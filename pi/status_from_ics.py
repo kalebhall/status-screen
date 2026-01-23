@@ -4,7 +4,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-RUNTIME_DIR = "/home/pi/status-screen"  # where services will run & write status
+RUNTIME_DIR = os.environ.get("STATUS_SCREEN_DIR", "/home/pi/status-screen")
 
 STATUS_JSON_PATH = os.path.join(RUNTIME_DIR, "status.json")
 OVERRIDE_JSON_PATH = os.path.join(RUNTIME_DIR, "override.json")
