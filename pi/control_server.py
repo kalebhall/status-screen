@@ -129,7 +129,12 @@ def api_override():
     state = data.get("state", "busy")
     label = data.get("label", "BUSY")
     detail = data.get("detail", "")
-    minutes = max(1, min(int(data.get("minutes", 30)), 24 * 60))
+    raw_minutes = data.get("minutes", 30)
+    try:
+        minutes_value = int(raw_minutes)
+    except (TypeError, ValueError):
+        minutes_value = 30
+    minutes = max(1, min(minutes_value, 24 * 60))
     return jsonify(write_override(state, label, detail, minutes))
 
 @app.post("/api/clear")
