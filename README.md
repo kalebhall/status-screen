@@ -7,7 +7,7 @@
 ## Pi install
 
 ```bash
-git clone <your repo url>
+git clone https://github.com/kalebhall/status-screen.git
 cd status-screen
 ./scripts/install_pi.sh
 cp /home/pi/status-screen/.env.example /home/pi/status-screen/.env
