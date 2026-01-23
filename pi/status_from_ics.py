@@ -1,10 +1,7 @@
 import json
 import os
 import time
-import requests
 from datetime import datetime, timedelta, timezone
-from dateutil import tz
-from ics import Calendar
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 RUNTIME_DIR = "/home/pi/status-screen"  # where services will run & write status
@@ -87,6 +84,8 @@ def load_override() -> dict | None:
         return None
 
 def fetch_ics_text() -> str:
+    import requests
+
     if not ICS_URL:
         raise RuntimeError("ICS_URL is not set")
     headers = {"User-Agent": "StatusScreenPi/1.0"}
@@ -118,6 +117,9 @@ def is_all_day_event(e) -> bool:
     return False
 
 def current_calendar_event(ics_text: str) -> dict | None:
+    from dateutil import tz
+    from ics import Calendar
+
     local_tz = tz.gettz(TIMEZONE_NAME)
     now = now_utc()
     cal = Calendar(ics_text)

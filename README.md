@@ -2,13 +2,13 @@
 
 - Reads an ICS calendar feed to determine "IN A MEETING" / "OUT OF OFFICE"
 - Allows remote override via web control page (LAN)
-- Calendar always wins if an event is active
+- Calendar always wins if an event is active (all-day events only count if they match OOO keywords)
 
 ## Pi install
 
 ```bash
 git clone <your repo url>
-cd status-screen-pi
+cd status-screen
 ./scripts/install_pi.sh
 cp /home/pi/status-screen/.env.example /home/pi/status-screen/.env
 nano /home/pi/status-screen/.env
