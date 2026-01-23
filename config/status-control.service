@@ -1,0 +1,13 @@
+[Unit]
+Description=Status Screen - Control Server
+After=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/status-screen
+ExecStart=/home/pi/status-screen/.venv/bin/python /home/pi/status-screen/pi/control_server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
