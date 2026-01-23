@@ -3,7 +3,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from flask import Flask, request, jsonify, Response
 
-RUNTIME_DIR = "/home/pi/status-screen"
+RUNTIME_DIR = os.environ.get("STATUS_SCREEN_DIR", "/home/pi/status-screen")
 OVERRIDE_JSON_PATH = os.path.join(RUNTIME_DIR, "override.json")
 
 def load_dotenv(dotenv_path: str):

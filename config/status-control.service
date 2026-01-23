@@ -3,9 +3,10 @@ Description=Status Screen - Control Server
 After=network-online.target
 
 [Service]
-User=pi
-WorkingDirectory=/home/pi/status-screen
-ExecStart=/home/pi/status-screen/.venv/bin/python /home/pi/status-screen/pi/control_server.py
+User=__STATUS_SCREEN_USER__
+Environment=STATUS_SCREEN_DIR=__STATUS_SCREEN_DIR__
+WorkingDirectory=__STATUS_SCREEN_DIR__
+ExecStart=__STATUS_SCREEN_DIR__/.venv/bin/python __STATUS_SCREEN_DIR__/pi/control_server.py
 Restart=always
 RestartSec=5
 

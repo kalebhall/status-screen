@@ -2,23 +2,22 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RUNTIME_DIR="/home/pi/status-screen"
+STATUS_SCREEN_USER="${STATUS_SCREEN_USER:-pi}"
+RUNTIME_DIR="${STATUS_SCREEN_DIR:-/home/${STATUS_SCREEN_USER}/status-screen}"
 
 sudo apt update
 sudo apt install -y nginx python3-venv python3-pip ca-certificates
 sudo update-ca-certificates
 
-mkdir -p "$RUNTIME_DIR"
-sudo chown -R pi:pi "$RUNTIME_DIR"
+sudo mkdir -p "$RUNTIME_DIR"
+sudo chown -R "${STATUS_SCREEN_USER}:${STATUS_SCREEN_USER}" "$RUNTIME_DIR"
 
 # Copy repo contents into runtime dir (simple deployment model)
 rsync -a --delete --exclude '.git' "$REPO_DIR/" "$RUNTIME_DIR/"
 
-cd "$RUNTIME_DIR"
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install requests ics python-dateutil flask
+sudo -u "$STATUS_SCREEN_USER" python3 -m venv "$RUNTIME_DIR/.venv"
+sudo -u "$STATUS_SCREEN_USER" "$RUNTIME_DIR/.venv/bin/pip" install --upgrade pip
+sudo -u "$STATUS_SCREEN_USER" "$RUNTIME_DIR/.venv/bin/pip" install requests ics python-dateutil flask
 
 # Web
 sudo rm -rf /var/www/html/*
@@ -30,16 +29,27 @@ sudo chmod -R 755 /var/www/html
 sudo sed -i '/server {/a \\' /etc/nginx/sites-available/default
 sudo sed -i '/server {/a \\' /etc/nginx/sites-available/default
 # Append our locations if not already present
-if ! grep -q "alias /home/pi/status-screen/status.json" /etc/nginx/sites-available/default; then
+if ! grep -q "include /etc/nginx/snippets/status-screen.conf;" /etc/nginx/sites-available/default; then
   sudo sed -i '/server {/a \    include /etc/nginx/snippets/status-screen.conf;\n' /etc/nginx/sites-available/default
 fi
 sudo mkdir -p /etc/nginx/snippets
-sudo cp "$RUNTIME_DIR/config/nginx-status-screen.conf" /etc/nginx/snippets/status-screen.conf
+sudo sed \
+  -e "s|__STATUS_SCREEN_DIR__|$RUNTIME_DIR|g" \
+  "$RUNTIME_DIR/config/nginx-status-screen.conf" \
+  | sudo tee /etc/nginx/snippets/status-screen.conf >/dev/null
 sudo systemctl restart nginx
 
 # systemd services
-sudo cp "$RUNTIME_DIR/config/status-from-ics.service" /etc/systemd/system/status-from-ics.service
-sudo cp "$RUNTIME_DIR/config/status-control.service" /etc/systemd/system/status-control.service
+sudo sed \
+  -e "s|__STATUS_SCREEN_USER__|$STATUS_SCREEN_USER|g" \
+  -e "s|__STATUS_SCREEN_DIR__|$RUNTIME_DIR|g" \
+  "$RUNTIME_DIR/config/status-from-ics.service" \
+  | sudo tee /etc/systemd/system/status-from-ics.service >/dev/null
+sudo sed \
+  -e "s|__STATUS_SCREEN_USER__|$STATUS_SCREEN_USER|g" \
+  -e "s|__STATUS_SCREEN_DIR__|$RUNTIME_DIR|g" \
+  "$RUNTIME_DIR/config/status-control.service" \
+  | sudo tee /etc/systemd/system/status-control.service >/dev/null
 sudo systemctl daemon-reload
 sudo systemctl enable status-from-ics.service status-control.service
 sudo systemctl restart status-from-ics.service status-control.service
