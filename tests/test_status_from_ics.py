@@ -81,6 +81,24 @@ class StatusFromIcsTests(unittest.TestCase):
         self.assertIsNotNone(event)
         self.assertEqual(event["name"], "Standup")
 
+    def test_event_end_is_exclusive(self):
+        status_from_ics.now_utc = lambda: datetime(2024, 1, 1, 10, 0, tzinfo=timezone.utc)
+        ics_text = "\n".join(
+            [
+                "BEGIN:VCALENDAR",
+                "VERSION:2.0",
+                "BEGIN:VEVENT",
+                "UID:event-1",
+                "DTSTAMP:20240101T090000Z",
+                "DTSTART:20240101T090000Z",
+                "DTEND:20240101T100000Z",
+                "SUMMARY:Wrap-up",
+                "END:VEVENT",
+                "END:VCALENDAR",
+            ]
+        )
+        self.assertIsNone(status_from_ics.current_calendar_event(ics_text))
+
 
 if __name__ == "__main__":
     unittest.main()
