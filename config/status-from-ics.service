@@ -1,0 +1,13 @@
+[Unit]
+Description=Status Screen - ICS Calendar Resolver
+After=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/status-screen
+ExecStart=/home/pi/status-screen/.venv/bin/python /home/pi/status-screen/pi/status_from_ics.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
