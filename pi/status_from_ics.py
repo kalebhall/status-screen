@@ -134,7 +134,7 @@ def current_calendar_event(ics_text: str) -> dict | None:
         except Exception:
             continue
 
-        if start_utc <= now <= end_utc:
+        if start_utc <= now < end_utc:
             if ALLDAY_ONLY_COUNTS_IF_OOO and is_all_day_event(e) and not is_ooo(name):
                 continue
             active.append((start_utc, name))
