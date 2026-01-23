@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=1920, height=480, initial-scale=1.0" />
+  <title>Status Display</title>
+  <style>
+    body { margin:0; font-family: Arial, sans-serif; background:black; color:white; overflow:hidden; }
+    .bar { width: 1920px; height: 480px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-weight:bold; text-transform:uppercase; }
+    .label { font-size: 140px; line-height: 1.0; }
+    .detail { font-size: 64px; opacity: 0.9; margin-top: 10px; text-transform:none; }
+    .available { background:#00a651; }
+    .busy { background:#c0392b; }
+    .meeting { background:#2980b9; }
+    .ooo { background:#8e44ad; }
+    .error { background:#7f8c8d; }
+    .footer { position:absolute; bottom:20px; right:40px; font-size:42px; opacity:0.85; }
+  </style>
+</head>
+<body>
+  <div id="bar" class="bar available">
+    <div id="label" class="label">AVAILABLE</div>
+    <div id="detail" class="detail"></div>
+  </div>
+  <div id="footer" class="footer"></div>
+
+  <script>
+    const footer = document.getElementById("footer");
+    const bar = document.getElementById("bar");
+    const label = document.getElementById("label");
+    const detail = document.getElementById("detail");
+
+    function updateClock() { footer.textContent = new Date().toLocaleString(); }
+
+    async function loadStatus() {
+      try {
+        const r = await fetch("/status.json?cache=" + Date.now());
+        const data = await r.json();
+        bar.className = "bar " + (data.state || "error");
+        label.textContent = data.label || "UNKNOWN";
+        detail.textContent = data.detail || "";
+      } catch (e) {
+        bar.className = "bar error";
+        label.textContent = "STATUS ERROR";
+        detail.textContent = "";
+      }
+    }
+
+    setInterval(updateClock, 1000);
+    setInterval(loadStatus, 2000);
+    updateClock();
+    loadStatus();
+  </script>
+</body>
+</html>
