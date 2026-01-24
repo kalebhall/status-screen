@@ -46,7 +46,13 @@ def parse_iso(dt_str: str) -> datetime | None:
     except Exception:
         return None
 
-def write_status(state: str, label: str, detail: str = "", source: str = ""):
+def write_status(
+    state: str,
+    label: str,
+    detail: str = "",
+    source: str = "",
+    until: str | None = None,
+):
     payload = {
         "state": state,
         "label": label,
@@ -54,6 +60,8 @@ def write_status(state: str, label: str, detail: str = "", source: str = ""):
         "source": source,
         "updated": datetime.now().isoformat(timespec="seconds"),
     }
+    if until:
+        payload["until"] = until
     os.makedirs(os.path.dirname(STATUS_JSON_PATH), exist_ok=True)
     tmp = STATUS_JSON_PATH + ".tmp"
     with open(tmp, "w") as f:
@@ -137,12 +145,12 @@ def current_calendar_event(ics_text: str) -> dict | None:
         if start_utc <= now < end_utc:
             if ALLDAY_ONLY_COUNTS_IF_OOO and is_all_day_event(e) and not is_ooo(name):
                 continue
-            active.append((start_utc, name))
+            active.append((start_utc, end_utc, name))
 
     if not active:
         return None
     active.sort(key=lambda x: x[0])
-    return {"name": active[0][1]}
+    return {"name": active[0][2], "end": active[0][1]}
 
 def resolve_and_write():
     try:
@@ -150,10 +158,11 @@ def resolve_and_write():
         ev = current_calendar_event(ics_text)
         if ev:
             name = ev["name"]
+            until = ev["end"].isoformat().replace("+00:00", "Z")
             if is_ooo(name):
-                write_status("ooo", "OUT OF OFFICE", name, source="calendar")
+                write_status("ooo", "OUT OF OFFICE", name, source="calendar", until=until)
             else:
-                write_status("meeting", "IN A MEETING", name, source="calendar")
+                write_status("meeting", "IN A MEETING", name, source="calendar", until=until)
             return
 
         override = load_override()
@@ -163,6 +172,7 @@ def resolve_and_write():
                 override.get("label", "BUSY"),
                 override.get("detail", ""),
                 source="override",
+                until=override.get("until"),
             )
             return
 

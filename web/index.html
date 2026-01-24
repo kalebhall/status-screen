@@ -8,7 +8,10 @@
     body { margin:0; font-family: Arial, sans-serif; background:black; color:white; overflow:hidden; }
     .bar { width: 1920px; height: 480px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-weight:bold; text-transform:uppercase; }
     .label { font-size: 140px; line-height: 1.0; }
+    .label-row { display:flex; align-items:center; gap: 30px; }
+    .status-icon { font-size: 120px; line-height: 1.0; filter: drop-shadow(0 4px 4px rgba(0,0,0,0.35)); }
     .detail { font-size: 64px; opacity: 0.9; margin-top: 10px; text-transform:none; }
+    .countdown { font-size: 52px; opacity: 0.85; margin-top: 12px; text-transform:none; }
     .available { background:#00a651; }
     .busy { background:#c0392b; }
     .meeting { background:#2980b9; }
@@ -19,16 +22,64 @@
 </head>
 <body>
   <div id="bar" class="bar available">
-    <div id="label" class="label">AVAILABLE</div>
+    <div class="label label-row">
+      <span id="icon" class="status-icon">●</span>
+      <span id="label">AVAILABLE</span>
+    </div>
     <div id="detail" class="detail"></div>
+    <div id="countdown" class="countdown"></div>
   </div>
   <div id="footer" class="footer"></div>
 
   <script>
     const footer = document.getElementById("footer");
     const bar = document.getElementById("bar");
+    const icon = document.getElementById("icon");
     const label = document.getElementById("label");
     const detail = document.getElementById("detail");
+    const countdown = document.getElementById("countdown");
+    let currentUntil = null;
+    let currentState = "available";
+
+    const iconByState = {
+      available: "✅",
+      busy: "⛔",
+      meeting: "📅",
+      ooo: "✈️",
+      error: "⚠️",
+    };
+
+    function formatCountdown(msRemaining) {
+      const totalSeconds = Math.max(0, Math.floor(msRemaining / 1000));
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      if (hours > 0) {
+        return `${hours}h ${minutes}m`;
+      }
+      if (minutes > 0) {
+        return `${minutes}m ${seconds}s`;
+      }
+      return `${seconds}s`;
+    }
+
+    function updateCountdown(untilIso, state) {
+      if (!untilIso || ["available", "ooo"].includes(state)) {
+        countdown.textContent = "";
+        return;
+      }
+      const endTime = new Date(untilIso);
+      if (Number.isNaN(endTime.getTime())) {
+        countdown.textContent = "";
+        return;
+      }
+      const remaining = endTime.getTime() - Date.now();
+      if (remaining <= 0) {
+        countdown.textContent = "Ending now";
+        return;
+      }
+      countdown.textContent = `Ends in ${formatCountdown(remaining)}`;
+    }
 
     function updateClock() { footer.textContent = new Date().toLocaleString(); }
 
@@ -36,18 +87,28 @@
       try {
         const r = await fetch("/status.json?cache=" + Date.now());
         const data = await r.json();
-        bar.className = "bar " + (data.state || "error");
+        const state = data.state || "error";
+        bar.className = "bar " + state;
+        icon.textContent = iconByState[state] || "●";
         label.textContent = data.label || "UNKNOWN";
         detail.textContent = data.detail || "";
+        currentUntil = data.until || null;
+        currentState = state;
+        updateCountdown(currentUntil, currentState);
       } catch (e) {
         bar.className = "bar error";
+        icon.textContent = iconByState.error;
         label.textContent = "STATUS ERROR";
         detail.textContent = "";
+        countdown.textContent = "";
+        currentUntil = null;
+        currentState = "error";
       }
     }
 
     setInterval(updateClock, 1000);
     setInterval(loadStatus, 2000);
+    setInterval(() => updateCountdown(currentUntil, currentState), 1000);
     updateClock();
     loadStatus();
   </script>
