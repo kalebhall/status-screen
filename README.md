@@ -3,6 +3,7 @@
 - Reads an ICS calendar feed to determine "IN A MEETING" / "OUT OF OFFICE"
 - Allows remote override via web control page (LAN)
 - Calendar always wins if an event is active (all-day events only count if they match OOO keywords)
+- Optional working hours automatically mark time outside of normal hours as OUT OF OFFICE
 
 ## Pi install
 
@@ -14,6 +15,22 @@ cp /home/screen/status-screen/.env.example /home/screen/status-screen/.env
 nano /home/screen/status-screen/.env
 sudo systemctl restart status-from-ics.service status-control.service
 ```
+
+## Working hours / office time
+
+You can automatically mark time outside your normal office hours as out of office by adding these values to `.env`:
+
+```bash
+WORK_HOURS_START="09:00"
+WORK_HOURS_END="17:00"
+WORK_HOURS_DAYS="Mon-Fri"
+```
+
+Notes:
+
+- Working hours are evaluated in `TIMEZONE_NAME`.
+- Calendar events still win during scheduled meetings.
+- `WORK_HOURS_DAYS` supports comma-separated days or ranges (e.g., `Mon,Wed,Fri` or `Mon-Fri`).
 
 To install for a different user or runtime directory:
 
