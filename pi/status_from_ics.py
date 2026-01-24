@@ -28,13 +28,171 @@ load_dotenv(os.path.join(RUNTIME_DIR, ".env"))
 ICS_URL = os.environ.get("ICS_URL", "")
 TIMEZONE_NAME = os.environ.get("TIMEZONE_NAME", "America/Los_Angeles")
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "60"))
+WORK_HOURS_START = os.environ.get("WORK_HOURS_START", "")
+WORK_HOURS_END = os.environ.get("WORK_HOURS_END", "")
+WORK_HOURS_DAYS = os.environ.get("WORK_HOURS_DAYS", "")
 
 OOO_KEYWORDS = ["out of office", "ooo", "vacation", "leave", "pto", "sick"]
 IGNORE_KEYWORDS = ["cancelled", "canceled"]
 ALLDAY_ONLY_COUNTS_IF_OOO = True
 
+DAY_NAME_TO_INDEX = {
+    "mon": 0,
+    "monday": 0,
+    "tue": 1,
+    "tues": 1,
+    "tuesday": 1,
+    "wed": 2,
+    "wednesday": 2,
+    "thu": 3,
+    "thur": 3,
+    "thurs": 3,
+    "thursday": 3,
+    "fri": 4,
+    "friday": 4,
+    "sat": 5,
+    "saturday": 5,
+    "sun": 6,
+    "sunday": 6,
+}
+
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+def get_local_tz():
+    from dateutil import tz
+
+    return tz.gettz(TIMEZONE_NAME)
+
+def parse_hhmm(value: str) -> tuple[int, int] | None:
+    try:
+        hour_str, minute_str = value.split(":", 1)
+        hour = int(hour_str)
+        minute = int(minute_str)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    return hour, minute
+
+def parse_day_token(token: str) -> int | None:
+    t = (token or "").strip().lower()
+    if not t:
+        return None
+    if t in DAY_NAME_TO_INDEX:
+        return DAY_NAME_TO_INDEX[t]
+    try:
+        day_index = int(t)
+    except ValueError:
+        return None
+    if 0 <= day_index <= 6:
+        return day_index
+    return None
+
+def expand_day_range(start_day: int, end_day: int) -> set[int]:
+    if start_day <= end_day:
+        return set(range(start_day, end_day + 1))
+    return set(range(start_day, 7)) | set(range(0, end_day + 1))
+
+def parse_days(value: str) -> set[int]:
+    if not value:
+        return set(range(0, 5))
+    days: set[int] = set()
+    for raw_token in value.split(","):
+        token = raw_token.strip()
+        if not token:
+            continue
+        if "-" in token:
+            start_raw, end_raw = token.split("-", 1)
+            start_day = parse_day_token(start_raw)
+            end_day = parse_day_token(end_raw)
+            if start_day is None or end_day is None:
+                continue
+            days |= expand_day_range(start_day, end_day)
+            continue
+        day_index = parse_day_token(token)
+        if day_index is not None:
+            days.add(day_index)
+    return days or set(range(0, 5))
+
+def build_work_hours_config() -> dict | None:
+    if not WORK_HOURS_START or not WORK_HOURS_END:
+        return None
+    start = parse_hhmm(WORK_HOURS_START)
+    end = parse_hhmm(WORK_HOURS_END)
+    if not start or not end:
+        return None
+    days = parse_days(WORK_HOURS_DAYS)
+    start_minutes = start[0] * 60 + start[1]
+    end_minutes = end[0] * 60 + end[1]
+    return {
+        "start": start,
+        "end": end,
+        "days": days,
+        "start_minutes": start_minutes,
+        "end_minutes": end_minutes,
+        "overnight": end_minutes <= start_minutes,
+    }
+
+WORK_HOURS = build_work_hours_config()
+
+def is_within_work_hours(now_local: datetime, config: dict) -> bool:
+    minutes = now_local.hour * 60 + now_local.minute
+    day = now_local.weekday()
+    if not config["overnight"]:
+        return day in config["days"] and config["start_minutes"] <= minutes < config["end_minutes"]
+    prev_day = (day - 1) % 7
+    in_today_window = day in config["days"] and minutes >= config["start_minutes"]
+    in_prev_day_window = prev_day in config["days"] and minutes < config["end_minutes"]
+    return in_today_window or in_prev_day_window
+
+def next_work_start(now_local: datetime, config: dict) -> datetime | None:
+    if not config["days"]:
+        return None
+    start_hour, start_minute = config["start"]
+    for day_offset in range(0, 14):
+        candidate_date = (now_local + timedelta(days=day_offset)).date()
+        candidate_dt = datetime(
+            candidate_date.year,
+            candidate_date.month,
+            candidate_date.day,
+            start_hour,
+            start_minute,
+            tzinfo=now_local.tzinfo,
+        )
+        if candidate_dt.weekday() not in config["days"]:
+            continue
+        if candidate_dt <= now_local:
+            continue
+        return candidate_dt
+    return None
+
+def format_work_hours_detail(config: dict) -> str:
+    start_hour, start_minute = config["start"]
+    end_hour, end_minute = config["end"]
+    return f"Outside working hours ({start_hour:02d}:{start_minute:02d}-{end_hour:02d}:{end_minute:02d})"
+
+def working_hours_status(now: datetime | None = None) -> dict | None:
+    config = WORK_HOURS
+    if not config:
+        return None
+    local_tz = get_local_tz()
+    if local_tz is None:
+        return None
+    current_local = (now or now_utc()).astimezone(local_tz)
+    if is_within_work_hours(current_local, config):
+        return None
+    next_start_local = next_work_start(current_local, config)
+    until = None
+    if next_start_local:
+        until = next_start_local.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return {
+        "state": "ooo",
+        "label": "OUT OF OFFICE",
+        "detail": format_work_hours_detail(config),
+        "until": until,
+        "source": "working_hours",
+    }
 
 def parse_iso(dt_str: str) -> datetime | None:
     try:
@@ -128,10 +286,11 @@ def is_all_day_event(e) -> bool:
     return False
 
 def current_calendar_event(ics_text: str) -> dict | None:
-    from dateutil import tz
     from ics import Calendar
 
-    local_tz = tz.gettz(TIMEZONE_NAME)
+    local_tz = get_local_tz()
+    if local_tz is None:
+        return None
     now = now_utc()
     cal = Calendar(ics_text)
 
@@ -156,10 +315,11 @@ def current_calendar_event(ics_text: str) -> dict | None:
     return {"name": active[0][2], "end": active[0][1]}
 
 def next_calendar_event(ics_text: str) -> dict | None:
-    from dateutil import tz
     from ics import Calendar
 
-    local_tz = tz.gettz(TIMEZONE_NAME)
+    local_tz = get_local_tz()
+    if local_tz is None:
+        return None
     now = now_utc()
     cal = Calendar(ics_text)
     upcoming = []
@@ -222,6 +382,18 @@ def resolve_and_write():
                 override.get("detail", ""),
                 source="override",
                 until=override.get("until"),
+                next_event_at=next_event_at,
+            )
+            return
+
+        work_status = working_hours_status()
+        if work_status:
+            write_status(
+                work_status["state"],
+                work_status["label"],
+                work_status["detail"],
+                source=work_status["source"],
+                until=work_status.get("until"),
                 next_event_at=next_event_at,
             )
             return
