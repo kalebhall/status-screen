@@ -52,6 +52,7 @@ def write_status(
     detail: str = "",
     source: str = "",
     until: str | None = None,
+    next_event_at: str | None = None,
 ):
     payload = {
         "state": state,
@@ -62,6 +63,8 @@ def write_status(
     }
     if until:
         payload["until"] = until
+    if next_event_at:
+        payload["next_event_at"] = next_event_at
     os.makedirs(os.path.dirname(STATUS_JSON_PATH), exist_ok=True)
     tmp = STATUS_JSON_PATH + ".tmp"
     with open(tmp, "w") as f:
@@ -152,17 +155,63 @@ def current_calendar_event(ics_text: str) -> dict | None:
     active.sort(key=lambda x: x[0])
     return {"name": active[0][2], "end": active[0][1]}
 
+def next_calendar_event(ics_text: str) -> dict | None:
+    from dateutil import tz
+    from ics import Calendar
+
+    local_tz = tz.gettz(TIMEZONE_NAME)
+    now = now_utc()
+    cal = Calendar(ics_text)
+    upcoming = []
+
+    for e in cal.events:
+        name = e.name or "Meeting"
+        if should_ignore(name):
+            continue
+        try:
+            start_utc, end_utc = event_times_to_utc(e.begin, e.end, local_tz)
+        except Exception:
+            continue
+        if start_utc <= now:
+            continue
+        if ALLDAY_ONLY_COUNTS_IF_OOO and is_all_day_event(e) and not is_ooo(name):
+            continue
+        upcoming.append((start_utc, end_utc, name))
+
+    if not upcoming:
+        return None
+    upcoming.sort(key=lambda x: x[0])
+    return {"name": upcoming[0][2], "start": upcoming[0][0]}
+
 def resolve_and_write():
     try:
         ics_text = fetch_ics_text()
         ev = current_calendar_event(ics_text)
+        next_ev = next_calendar_event(ics_text)
+        next_event_at = None
+        if next_ev:
+            next_event_at = next_ev["start"].isoformat().replace("+00:00", "Z")
         if ev:
             name = ev["name"]
             until = ev["end"].isoformat().replace("+00:00", "Z")
             if is_ooo(name):
-                write_status("ooo", "OUT OF OFFICE", name, source="calendar", until=until)
+                write_status(
+                    "ooo",
+                    "OUT OF OFFICE",
+                    name,
+                    source="calendar",
+                    until=until,
+                    next_event_at=next_event_at,
+                )
             else:
-                write_status("meeting", "IN A MEETING", name, source="calendar", until=until)
+                write_status(
+                    "meeting",
+                    "IN A MEETING",
+                    name,
+                    source="calendar",
+                    until=until,
+                    next_event_at=next_event_at,
+                )
             return
 
         override = load_override()
@@ -173,10 +222,11 @@ def resolve_and_write():
                 override.get("detail", ""),
                 source="override",
                 until=override.get("until"),
+                next_event_at=next_event_at,
             )
             return
 
-        write_status("available", "AVAILABLE", "", source="default")
+        write_status("available", "AVAILABLE", "", source="default", next_event_at=next_event_at)
     except Exception as ex:
         write_status("error", "STATUS ERROR", str(ex)[:100], source="error")
 
