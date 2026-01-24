@@ -11,6 +11,7 @@
     .label-row { display:flex; align-items:center; gap: 30px; }
     .status-icon { font-size: 120px; line-height: 1.0; filter: drop-shadow(0 4px 4px rgba(0,0,0,0.35)); }
     .detail { font-size: 64px; opacity: 0.9; margin-top: 10px; text-transform:none; }
+    .next-event { font-size: 52px; opacity: 0.85; margin-top: 12px; text-transform:none; }
     .countdown { font-size: 52px; opacity: 0.85; margin-top: 12px; text-transform:none; }
     .available { background:#00a651; }
     .busy { background:#c0392b; }
@@ -27,6 +28,7 @@
       <span id="label">AVAILABLE</span>
     </div>
     <div id="detail" class="detail"></div>
+    <div id="next-event" class="next-event"></div>
     <div id="countdown" class="countdown"></div>
   </div>
   <div id="footer" class="footer"></div>
@@ -37,9 +39,11 @@
     const icon = document.getElementById("icon");
     const label = document.getElementById("label");
     const detail = document.getElementById("detail");
+    const nextEvent = document.getElementById("next-event");
     const countdown = document.getElementById("countdown");
     let currentUntil = null;
     let currentState = "available";
+    let currentNextEventAt = null;
 
     const iconByState = {
       available: "✅",
@@ -81,6 +85,20 @@
       countdown.textContent = `Ends in ${formatCountdown(remaining)}`;
     }
 
+    function updateNextEvent(nextEventAt, state) {
+      if (!nextEventAt || state === "ooo") {
+        nextEvent.textContent = "";
+        return;
+      }
+      const nextTime = new Date(nextEventAt);
+      if (Number.isNaN(nextTime.getTime())) {
+        nextEvent.textContent = "";
+        return;
+      }
+      const formattedTime = nextTime.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      nextEvent.textContent = `Next event at ${formattedTime}`;
+    }
+
     function updateClock() { footer.textContent = new Date().toLocaleString(); }
 
     async function loadStatus() {
@@ -93,15 +111,19 @@
         label.textContent = data.label || "UNKNOWN";
         detail.textContent = data.detail || "";
         currentUntil = data.until || null;
+        currentNextEventAt = data.next_event_at || null;
         currentState = state;
         updateCountdown(currentUntil, currentState);
+        updateNextEvent(currentNextEventAt, currentState);
       } catch (e) {
         bar.className = "bar error";
         icon.textContent = iconByState.error;
         label.textContent = "STATUS ERROR";
         detail.textContent = "";
+        nextEvent.textContent = "";
         countdown.textContent = "";
         currentUntil = null;
+        currentNextEventAt = null;
         currentState = "error";
       }
     }
@@ -109,6 +131,7 @@
     setInterval(updateClock, 1000);
     setInterval(loadStatus, 2000);
     setInterval(() => updateCountdown(currentUntil, currentState), 1000);
+    setInterval(() => updateNextEvent(currentNextEventAt, currentState), 1000);
     updateClock();
     loadStatus();
   </script>
