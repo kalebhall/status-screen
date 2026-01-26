@@ -292,7 +292,7 @@ def fetch_ics_text() -> str:
             fetch_url = outlook_url
     headers = {"User-Agent": "StatusScreenPi/1.0"}
     try:
-        r = requests.get(fetch_url, headers=headers, timeout=25, allow_redirects=True)
+        r = requests.get(fetch_url, headers=headers, timeout=100, allow_redirects=True)
         r.raise_for_status()
         text = r.text
         if "BEGIN:VCALENDAR" not in text[:2000]:
