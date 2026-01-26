@@ -5,6 +5,20 @@
 - Calendar always wins if an event is active (all-day events only count if they match OOO keywords)
 - Optional working hours automatically mark time outside of normal hours as OUT OF OFFICE
 
+## Calendar keywords for status changes
+
+All-day events only flip the status to **OUT OF OFFICE** when the event title contains one of
+these case-insensitive keywords:
+
+- `out of office`
+- `ooo`
+- `vacation`
+- `leave`
+- `pto`
+- `sick`
+
+Events with `cancelled` or `canceled` in the title are ignored.
+
 ## Pi install
 
 ```bash
