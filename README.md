@@ -41,6 +41,16 @@ Notes:
 - Calendar events still win during scheduled meetings.
 - `WORK_HOURS_DAYS` supports comma-separated days or ranges (e.g., `Mon,Wed,Fri` or `Mon-Fri`).
 
+## ICS refresh caching
+
+To avoid fetching the calendar on every poll, the service caches the last ICS file and reuses it until the refresh timer expires:
+
+```bash
+ICS_REFRESH_SECONDS="300"
+```
+
+By default the cached file is stored at `/home/pi/status-screen/calendar.ics`. You can override the path with `ICS_CACHE_PATH` if needed.
+
 ## Office365 / Outlook ICS troubleshooting
 
 If the display shows `HTTPSConnectionPool(... Max retries exceeded ...)`, the Pi cannot reach the
