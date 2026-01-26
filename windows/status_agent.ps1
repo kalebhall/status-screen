@@ -41,9 +41,23 @@ function Set-OverrideBusy {
   } catch { }
 }
 
+function Clear-Override {
+  $uri = "$PiBaseUrl/api/clear"
+  try {
+    Invoke-RestMethod -Method Post -Uri $uri -Headers @{ "X-Auth-Token" = $Token } | Out-Null
+  } catch { }
+}
+
 Write-Host "Mic agent -> $PiBaseUrl  Poll=${PollSeconds}s Busy=${BusyMinutes}m"
 
+$micWasInUse = $false
 while ($true) {
-  if (Test-MicInUse) { Set-OverrideBusy }
+  $micInUse = Test-MicInUse
+  if ($micInUse) {
+    Set-OverrideBusy
+  } elseif ($micWasInUse) {
+    Clear-Override
+  }
+  $micWasInUse = $micInUse
   Start-Sleep -Seconds $PollSeconds
 }
