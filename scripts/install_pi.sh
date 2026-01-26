@@ -35,6 +35,9 @@ sudo chown -R www-data:www-data /var/www/html
 sudo chmod -R 755 /var/www/html
 
 # Nginx snippet
+if grep -q "location / {" /etc/nginx/sites-available/default; then
+  sudo sed -i '/location \/ {/,/}/d' /etc/nginx/sites-available/default
+fi
 sudo sed -i '/server {/a \\' /etc/nginx/sites-available/default
 sudo sed -i '/server {/a \\' /etc/nginx/sites-available/default
 # Append our locations if not already present
