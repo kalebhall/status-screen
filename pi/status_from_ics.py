@@ -344,11 +344,12 @@ def next_calendar_event(ics_text: str) -> dict | None:
     return {"name": upcoming[0][2], "start": upcoming[0][0]}
 
 def resolve_and_write():
+    next_event_at = None
+    error_detail = None
     try:
         ics_text = fetch_ics_text()
         ev = current_calendar_event(ics_text)
         next_ev = next_calendar_event(ics_text)
-        next_event_at = None
         if next_ev:
             next_event_at = next_ev["start"].isoformat().replace("+00:00", "Z")
         if ev:
@@ -373,34 +374,38 @@ def resolve_and_write():
                     next_event_at=next_event_at,
                 )
             return
-
-        override = load_override()
-        if override:
-            write_status(
-                override.get("state", "busy"),
-                override.get("label", "BUSY"),
-                override.get("detail", ""),
-                source="override",
-                until=override.get("until"),
-                next_event_at=next_event_at,
-            )
-            return
-
-        work_status = working_hours_status()
-        if work_status:
-            write_status(
-                work_status["state"],
-                work_status["label"],
-                work_status["detail"],
-                source=work_status["source"],
-                until=work_status.get("until"),
-                next_event_at=next_event_at,
-            )
-            return
-
-        write_status("available", "AVAILABLE", "", source="default", next_event_at=next_event_at)
     except Exception as ex:
-        write_status("error", "STATUS ERROR", str(ex)[:100], source="error")
+        error_detail = str(ex)[:100]
+
+    override = load_override()
+    if override:
+        write_status(
+            override.get("state", "busy"),
+            override.get("label", "BUSY"),
+            override.get("detail", ""),
+            source="override",
+            until=override.get("until"),
+            next_event_at=next_event_at,
+        )
+        return
+
+    work_status = working_hours_status()
+    if work_status:
+        write_status(
+            work_status["state"],
+            work_status["label"],
+            work_status["detail"],
+            source=work_status["source"],
+            until=work_status.get("until"),
+            next_event_at=next_event_at,
+        )
+        return
+
+    if error_detail:
+        write_status("error", "STATUS ERROR", error_detail, source="error")
+        return
+
+    write_status("available", "AVAILABLE", "", source="default", next_event_at=next_event_at)
 
 def main():
     write_status("available", "AVAILABLE", "", source="boot")
