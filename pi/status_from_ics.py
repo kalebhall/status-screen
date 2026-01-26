@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -9,21 +10,40 @@ RUNTIME_DIR = os.environ.get("STATUS_SCREEN_DIR", "/home/pi/status-screen")
 STATUS_JSON_PATH = os.path.join(RUNTIME_DIR, "status.json")
 OVERRIDE_JSON_PATH = os.path.join(RUNTIME_DIR, "override.json")
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+
 def load_dotenv(dotenv_path: str):
     if not os.path.exists(dotenv_path):
         return
-    with open(dotenv_path, "r") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            k = k.strip()
-            v = v.strip().strip('"').strip("'")
-            os.environ.setdefault(k, v)
+    try:
+        with open(dotenv_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip().strip('"').strip("'")
+                os.environ.setdefault(k, v)
+    except OSError as exc:
+        logging.warning("Failed to load dotenv file %s: %s", dotenv_path, exc)
 
 # Load secrets/config from /home/pi/status-screen/.env (runtime location)
 load_dotenv(os.path.join(RUNTIME_DIR, ".env"))
+
+def configure_logging():
+    level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
+    level = logging.INFO
+    if level_name in logging._nameToLevel:
+        level = logging._nameToLevel[level_name]
+    else:
+        logging.warning("Unknown LOG_LEVEL=%s, defaulting to INFO", level_name)
+    logging.getLogger().setLevel(level)
+
+configure_logging()
 
 ICS_URL = os.environ.get("ICS_URL", "")
 TIMEZONE_NAME = os.environ.get("TIMEZONE_NAME", "America/Los_Angeles")
@@ -66,7 +86,10 @@ def now_utc() -> datetime:
 def get_local_tz():
     from dateutil import tz
 
-    return tz.gettz(TIMEZONE_NAME)
+    local_tz = tz.gettz(TIMEZONE_NAME)
+    if local_tz is None:
+        logging.error("Invalid TIMEZONE_NAME=%s", TIMEZONE_NAME)
+    return local_tz
 
 def parse_hhmm(value: str) -> tuple[int, int] | None:
     try:
@@ -125,8 +148,16 @@ def build_work_hours_config() -> dict | None:
     start = parse_hhmm(WORK_HOURS_START)
     end = parse_hhmm(WORK_HOURS_END)
     if not start or not end:
+        logging.warning(
+            "Invalid work hours config: start=%s end=%s",
+            WORK_HOURS_START,
+            WORK_HOURS_END,
+        )
         return None
     days = parse_days(WORK_HOURS_DAYS)
+    if not days:
+        logging.warning("Invalid work hours days: %s", WORK_HOURS_DAYS)
+        return None
     start_minutes = start[0] * 60 + start[1]
     end_minutes = end[0] * 60 + end[1]
     return {
@@ -227,6 +258,7 @@ def write_status(
         payload["until"] = until
     if next_event_at:
         payload["next_event_at"] = next_event_at
+    logging.debug("Writing status: %s", payload)
     os.makedirs(os.path.dirname(STATUS_JSON_PATH), exist_ok=True)
     tmp = STATUS_JSON_PATH + ".tmp"
     with open(tmp, "w") as f:
@@ -254,6 +286,7 @@ def load_override() -> dict | None:
             return None
         return o
     except Exception:
+        logging.exception("Failed to load override from %s", OVERRIDE_JSON_PATH)
         return None
 
 def fetch_ics_text() -> str:
@@ -268,14 +301,19 @@ def fetch_ics_text() -> str:
                 cached_text = f.read()
             cache_age = time.time() - os.path.getmtime(ICS_CACHE_PATH)
         except Exception:
+            logging.exception("Failed to read ICS cache %s", ICS_CACHE_PATH)
             cached_text = None
             cache_age = None
 
-    if cached_text and cache_age is not None and cache_age < ICS_REFRESH_SECONDS:
+    if ICS_REFRESH_SECONDS < 0:
+        logging.warning("ICS_REFRESH_SECONDS=%s is invalid; forcing refresh", ICS_REFRESH_SECONDS)
+    if cached_text and cache_age is not None and cache_age < max(ICS_REFRESH_SECONDS, 0):
+        logging.debug("Using cached ICS file (%s seconds old).", int(cache_age))
         return cached_text
 
     if not ICS_URL:
         if cached_text:
+            logging.warning("ICS_URL is not set; using cached ICS")
             return cached_text
         raise RuntimeError("ICS_URL is not set")
     fetch_url = ICS_URL
@@ -292,6 +330,7 @@ def fetch_ics_text() -> str:
             fetch_url = outlook_url
     headers = {"User-Agent": "StatusScreenPi/1.0"}
     try:
+        logging.debug("Fetching ICS URL: %s", fetch_url)
         r = requests.get(fetch_url, headers=headers, timeout=100, allow_redirects=True)
         r.raise_for_status()
         text = r.text
@@ -304,13 +343,17 @@ def fetch_ics_text() -> str:
         os.replace(tmp, ICS_CACHE_PATH)
         return text
     except Exception:
+        logging.exception("Failed to fetch ICS from %s", fetch_url)
         if cached_text:
+            logging.warning("Using cached ICS after fetch failure.")
             return cached_text
         raise
 
 def event_times_to_utc(ev_begin, ev_end, local_tz) -> tuple[datetime, datetime]:
     start = ev_begin.datetime
     end = ev_end.datetime
+    if start is None or end is None:
+        raise ValueError("Event start/end missing")
     if start.tzinfo is None:
         start = start.replace(tzinfo=local_tz)
     if end.tzinfo is None:
@@ -335,7 +378,11 @@ def current_calendar_event(ics_text: str) -> dict | None:
     if local_tz is None:
         return None
     now = now_utc()
-    cal = Calendar(ics_text)
+    try:
+        cal = Calendar(ics_text)
+    except Exception:
+        logging.exception("Failed to parse ICS calendar")
+        return None
 
     active = []
     for e in cal.events:
@@ -345,6 +392,7 @@ def current_calendar_event(ics_text: str) -> dict | None:
         try:
             start_utc, end_utc = event_times_to_utc(e.begin, e.end, local_tz)
         except Exception:
+            logging.debug("Failed to parse event times for %s", name)
             continue
 
         if start_utc <= now < end_utc:
@@ -364,7 +412,11 @@ def next_calendar_event(ics_text: str) -> dict | None:
     if local_tz is None:
         return None
     now = now_utc()
-    cal = Calendar(ics_text)
+    try:
+        cal = Calendar(ics_text)
+    except Exception:
+        logging.exception("Failed to parse ICS calendar")
+        return None
     upcoming = []
 
     for e in cal.events:
@@ -374,6 +426,7 @@ def next_calendar_event(ics_text: str) -> dict | None:
         try:
             start_utc, end_utc = event_times_to_utc(e.begin, e.end, local_tz)
         except Exception:
+            logging.debug("Failed to parse event times for %s", name)
             continue
         if start_utc <= now:
             continue
@@ -418,7 +471,8 @@ def resolve_and_write():
                 )
             return
     except Exception as ex:
-        error_detail = str(ex)[:100]
+        logging.exception("Failed to resolve calendar status")
+        error_detail = f"{type(ex).__name__}: {str(ex)}"[:100]
 
     override = load_override()
     if override:
