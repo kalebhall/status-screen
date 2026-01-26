@@ -46,6 +46,12 @@ def parse_env_bool(key: str, default: bool) -> bool:
     logging.warning("Unknown %s=%s, defaulting to %s", key, raw, default)
     return default
 
+def parse_env_falsey(raw: str | None) -> bool:
+    if raw is None:
+        return False
+    value = raw.strip().lower()
+    return value in {"0", "false", "no", "n", "off"}
+
 def configure_logging():
     level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
     level = logging.INFO
@@ -347,7 +353,10 @@ def fetch_ics_text() -> str:
             fetch_url = outlook_url
     headers = {"User-Agent": "StatusScreenPi/1.0"}
     verify = True
-    if ICS_CA_BUNDLE:
+    if parse_env_falsey(ICS_CA_BUNDLE):
+        verify = False
+        logging.warning("TLS verification disabled via ICS_CA_BUNDLE/SSL_CERT_FILE/REQUESTS_CA_BUNDLE.")
+    elif ICS_CA_BUNDLE:
         if not os.path.exists(ICS_CA_BUNDLE):
             logging.warning("ICS_CA_BUNDLE does not exist: %s (using system defaults)", ICS_CA_BUNDLE)
         else:

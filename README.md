@@ -62,6 +62,12 @@ ICS_CA_BUNDLE="/home/pi/status-screen/fortigate-ca.pem"
 # SSL_CERT_FILE="/home/pi/status-screen/fortigate-ca.pem"
 ```
 
+To disable TLS certificate verification entirely (not recommended), set one of the bundle variables to `false`:
+
+```bash
+SSL_CERT_FILE="false"
+```
+
 Restart the service after updating `.env`: `sudo systemctl restart status-from-ics.service`.
 
 ## Office365 / Outlook ICS troubleshooting
