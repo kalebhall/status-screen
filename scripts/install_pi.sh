@@ -3,6 +3,15 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATUS_SCREEN_USER="${STATUS_SCREEN_USER:-pi}"
+if ! id -u "$STATUS_SCREEN_USER" >/dev/null 2>&1; then
+  if [[ -n "${SUDO_USER:-}" ]] && id -u "$SUDO_USER" >/dev/null 2>&1; then
+    echo "STATUS_SCREEN_USER '$STATUS_SCREEN_USER' not found; falling back to SUDO_USER '$SUDO_USER'."
+    STATUS_SCREEN_USER="$SUDO_USER"
+  else
+    echo "Error: STATUS_SCREEN_USER '$STATUS_SCREEN_USER' does not exist and no valid SUDO_USER found." >&2
+    exit 1
+  fi
+fi
 RUNTIME_DIR="${STATUS_SCREEN_DIR:-/home/${STATUS_SCREEN_USER}/status-screen}"
 
 sudo apt update
