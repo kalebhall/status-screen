@@ -34,6 +34,18 @@ def load_dotenv(dotenv_path: str):
 # Load secrets/config from /home/pi/status-screen/.env (runtime location)
 load_dotenv(os.path.join(RUNTIME_DIR, ".env"))
 
+def parse_env_bool(key: str, default: bool) -> bool:
+    raw = os.environ.get(key)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "y", "on"}:
+        return True
+    if value in {"0", "false", "no", "n", "off"}:
+        return False
+    logging.warning("Unknown %s=%s, defaulting to %s", key, raw, default)
+    return default
+
 def configure_logging():
     level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
     level = logging.INFO
@@ -63,7 +75,7 @@ WORK_HOURS_DAYS = os.environ.get("WORK_HOURS_DAYS", "")
 
 OOO_KEYWORDS = ["out of office", "ooo", "vacation", "leave", "pto", "sick"]
 IGNORE_KEYWORDS = ["cancelled", "canceled"]
-ALLDAY_ONLY_COUNTS_IF_OOO = True
+ALLDAY_ONLY_COUNTS_IF_OOO = parse_env_bool("ALLDAY_ONLY_COUNTS_IF_OOO", True)
 
 DAY_NAME_TO_INDEX = {
     "mon": 0,
