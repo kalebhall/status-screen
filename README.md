@@ -41,6 +41,21 @@ Notes:
 - Calendar events still win during scheduled meetings.
 - `WORK_HOURS_DAYS` supports comma-separated days or ranges (e.g., `Mon,Wed,Fri` or `Mon-Fri`).
 
+## Office365 / Outlook ICS troubleshooting
+
+If the display shows `HTTPSConnectionPool(... Max retries exceeded ...)`, the Pi cannot reach the
+ICS URL or is receiving a non-calendar response. Ensure:
+
+- The `ICS_URL` points to a published calendar feed (Settings → Calendar → Shared calendars → Publish a calendar).
+- The calendar is published with **Can view all details** and an ICS URL copied from the publish dialog.
+- The Pi can reach the URL over HTTPS (test from the Pi with `curl -I "<ICS_URL>"`; you should see a 200 and `BEGIN:VCALENDAR` in the body).
+
+If `curl -L "<ICS_URL>" -o /tmp/cal.ics` works on the Pi but the display still shows the error:
+
+- Confirm the runtime `.env` file at `/home/pi/status-screen/.env` contains the same `ICS_URL`.
+- Restart the service after changes: `sudo systemctl restart status-from-ics.service`.
+- Check logs for the live error message: `sudo journalctl -u status-from-ics.service -n 200 --no-pager`.
+
 To install for a different user or runtime directory:
 
 ```bash
