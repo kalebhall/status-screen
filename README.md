@@ -51,6 +51,19 @@ ICS_REFRESH_SECONDS="300"
 
 By default the cached file is stored at `/home/pi/status-screen/calendar.ics`. You can override the path with `ICS_CACHE_PATH` if needed.
 
+## Custom CA certificates (Fortigate DPI, etc.)
+
+If your network uses a custom TLS inspection certificate, set one of these environment variables so `requests` trusts it when downloading the ICS feed:
+
+```bash
+ICS_CA_BUNDLE="/home/pi/status-screen/fortigate-ca.pem"
+# or use the standard Requests/Python variables:
+# REQUESTS_CA_BUNDLE="/home/pi/status-screen/fortigate-ca.pem"
+# SSL_CERT_FILE="/home/pi/status-screen/fortigate-ca.pem"
+```
+
+Restart the service after updating `.env`: `sudo systemctl restart status-from-ics.service`.
+
 ## Office365 / Outlook ICS troubleshooting
 
 If the display shows `HTTPSConnectionPool(... Max retries exceeded ...)`, the Pi cannot reach the
