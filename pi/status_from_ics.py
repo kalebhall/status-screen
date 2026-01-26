@@ -28,6 +28,10 @@ load_dotenv(os.path.join(RUNTIME_DIR, ".env"))
 ICS_URL = os.environ.get("ICS_URL", "")
 TIMEZONE_NAME = os.environ.get("TIMEZONE_NAME", "America/Los_Angeles")
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "60"))
+ICS_REFRESH_SECONDS = int(os.environ.get("ICS_REFRESH_SECONDS", "300"))
+ICS_CACHE_PATH = os.environ.get(
+    "ICS_CACHE_PATH", os.path.join(RUNTIME_DIR, "calendar.ics")
+)
 WORK_HOURS_START = os.environ.get("WORK_HOURS_START", "")
 WORK_HOURS_END = os.environ.get("WORK_HOURS_END", "")
 WORK_HOURS_DAYS = os.environ.get("WORK_HOURS_DAYS", "")
@@ -255,15 +259,41 @@ def load_override() -> dict | None:
 def fetch_ics_text() -> str:
     import requests
 
+    cached_text = None
+    cache_age = None
+    if os.path.exists(ICS_CACHE_PATH):
+        try:
+            with open(ICS_CACHE_PATH, "r") as f:
+                cached_text = f.read()
+            cache_age = time.time() - os.path.getmtime(ICS_CACHE_PATH)
+        except Exception:
+            cached_text = None
+            cache_age = None
+
+    if cached_text and cache_age is not None and cache_age < ICS_REFRESH_SECONDS:
+        return cached_text
+
     if not ICS_URL:
+        if cached_text:
+            return cached_text
         raise RuntimeError("ICS_URL is not set")
     headers = {"User-Agent": "StatusScreenPi/1.0"}
-    r = requests.get(ICS_URL, headers=headers, timeout=25, allow_redirects=True)
-    r.raise_for_status()
-    text = r.text
-    if "BEGIN:VCALENDAR" not in text[:2000]:
-        raise RuntimeError("ICS fetch did not return VCALENDAR")
-    return text
+    try:
+        r = requests.get(ICS_URL, headers=headers, timeout=25, allow_redirects=True)
+        r.raise_for_status()
+        text = r.text
+        if "BEGIN:VCALENDAR" not in text[:2000]:
+            raise RuntimeError("ICS fetch did not return VCALENDAR")
+        os.makedirs(os.path.dirname(ICS_CACHE_PATH), exist_ok=True)
+        tmp = ICS_CACHE_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(text)
+        os.replace(tmp, ICS_CACHE_PATH)
+        return text
+    except Exception:
+        if cached_text:
+            return cached_text
+        raise
 
 def event_times_to_utc(ev_begin, ev_end, local_tz) -> tuple[datetime, datetime]:
     start = ev_begin.datetime
