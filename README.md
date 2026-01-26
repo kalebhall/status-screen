@@ -59,6 +59,7 @@ ICS URL or is receiving a non-calendar response. Ensure:
 - The `ICS_URL` points to a published calendar feed (Settings → Calendar → Shared calendars → Publish a calendar).
 - The calendar is published with **Can view all details** and an ICS URL copied from the publish dialog.
 - The Pi can reach the URL over HTTPS (test from the Pi with `curl -I "<ICS_URL>"`; you should see a 200 and `BEGIN:VCALENDAR` in the body).
+- The service also accepts `webcal://` URLs and Outlook subscription links (it will normalize them to the underlying HTTPS ICS feed).
 
 If `curl -L "<ICS_URL>" -o /tmp/cal.ics` works on the Pi but the display still shows the error:
 

@@ -258,6 +258,7 @@ def load_override() -> dict | None:
 
 def fetch_ics_text() -> str:
     import requests
+    from urllib.parse import parse_qs, urlparse, urlunparse
 
     cached_text = None
     cache_age = None
@@ -277,9 +278,21 @@ def fetch_ics_text() -> str:
         if cached_text:
             return cached_text
         raise RuntimeError("ICS_URL is not set")
+    fetch_url = ICS_URL
+    parsed = urlparse(fetch_url)
+    if parsed.scheme in {"webcal", "webcals"}:
+        fetch_url = urlunparse(parsed._replace(scheme="https"))
+    elif "outlook.live.com" in parsed.netloc and "rru=addsubscription" in parsed.query:
+        params = parse_qs(parsed.query)
+        outlook_url = params.get("url", [None])[0]
+        if outlook_url:
+            outlook_parsed = urlparse(outlook_url)
+            if outlook_parsed.scheme in {"webcal", "webcals"}:
+                outlook_url = urlunparse(outlook_parsed._replace(scheme="https"))
+            fetch_url = outlook_url
     headers = {"User-Agent": "StatusScreenPi/1.0"}
     try:
-        r = requests.get(ICS_URL, headers=headers, timeout=25, allow_redirects=True)
+        r = requests.get(fetch_url, headers=headers, timeout=25, allow_redirects=True)
         r.raise_for_status()
         text = r.text
         if "BEGIN:VCALENDAR" not in text[:2000]:
