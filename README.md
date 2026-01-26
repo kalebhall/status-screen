@@ -16,6 +16,15 @@ nano /home/screen/status-screen/.env
 sudo systemctl restart status-from-ics.service status-control.service
 ```
 
+## Nginx troubleshooting
+
+If Nginx logs `location` directive errors for `/etc/nginx/snippets/status-screen.conf`, the
+snippet is being loaded outside a `server {}` block. Ensure the snippet is only included
+inside the desired server configuration (for example in `/etc/nginx/sites-available/default`)
+and remove any global include of `/etc/nginx/snippets/*.conf` from `nginx.conf` or the `http {}`
+context. The `config/nginx-status-screen.conf` file is intended to be included inside a
+server block as written. 
+
 ## Working hours / office time
 
 You can automatically mark time outside your normal office hours as out of office by adding these values to `.env`:
