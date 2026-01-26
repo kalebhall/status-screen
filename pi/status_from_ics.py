@@ -52,6 +52,11 @@ ICS_REFRESH_SECONDS = int(os.environ.get("ICS_REFRESH_SECONDS", "300"))
 ICS_CACHE_PATH = os.environ.get(
     "ICS_CACHE_PATH", os.path.join(RUNTIME_DIR, "calendar.ics")
 )
+ICS_CA_BUNDLE = (
+    os.environ.get("ICS_CA_BUNDLE")
+    or os.environ.get("REQUESTS_CA_BUNDLE")
+    or os.environ.get("SSL_CERT_FILE")
+)
 WORK_HOURS_START = os.environ.get("WORK_HOURS_START", "")
 WORK_HOURS_END = os.environ.get("WORK_HOURS_END", "")
 WORK_HOURS_DAYS = os.environ.get("WORK_HOURS_DAYS", "")
@@ -329,9 +334,21 @@ def fetch_ics_text() -> str:
                 outlook_url = urlunparse(outlook_parsed._replace(scheme="https"))
             fetch_url = outlook_url
     headers = {"User-Agent": "StatusScreenPi/1.0"}
+    verify = True
+    if ICS_CA_BUNDLE:
+        if not os.path.exists(ICS_CA_BUNDLE):
+            logging.warning("ICS_CA_BUNDLE does not exist: %s (using system defaults)", ICS_CA_BUNDLE)
+        else:
+            verify = ICS_CA_BUNDLE
     try:
         logging.debug("Fetching ICS URL: %s", fetch_url)
-        r = requests.get(fetch_url, headers=headers, timeout=100, allow_redirects=True)
+        r = requests.get(
+            fetch_url,
+            headers=headers,
+            timeout=100,
+            allow_redirects=True,
+            verify=verify,
+        )
         r.raise_for_status()
         text = r.text
         if "BEGIN:VCALENDAR" not in text[:2000]:
