@@ -142,3 +142,40 @@ For a dedicated status display, launch Chromium in kiosk mode on the Pi:
 ```bash
 chromium-browser --kiosk --app="http://<pi-ip>/" --start-fullscreen
 ```
+
+## Multi-person e-ink display (3 people)
+
+To keep the original single-person display while supporting a larger 3-person e-ink panel, the
+project now includes a separate web layout plus an optional aggregator that merges multiple
+`status.json` files into one combined `status-multi.json`.
+
+### 1) Create a multi-status config
+
+Copy the example and update the per-person `status_json` paths to point at the runtime locations
+for each person (for example, separate `STATUS_SCREEN_DIR` instances that each run
+`status-from-ics.service`).
+
+```bash
+cp /home/pi/status-screen/config/status-multi.example.json /home/pi/status-screen/status-multi-config.json
+nano /home/pi/status-screen/status-multi-config.json
+```
+
+### 2) Run the aggregator
+
+Install and start the optional service:
+
+```bash
+sudo cp /home/pi/status-screen/config/status-multi.service /etc/systemd/system/status-multi.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now status-multi.service
+```
+
+This writes `status-multi.json` in the runtime directory, which the multi-person UI reads.
+
+### 3) Open the 3-person UI
+
+Use the new UI for larger displays:
+
+```text
+http://<pi-ip>/index-3up.html
+```

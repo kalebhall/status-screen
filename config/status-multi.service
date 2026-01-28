@@ -1,0 +1,15 @@
+[Unit]
+Description=Status Screen Multi Aggregator
+After=network.target
+
+[Service]
+Type=simple
+User=__STATUS_SCREEN_USER__
+WorkingDirectory=__STATUS_SCREEN_DIR__
+Environment=STATUS_SCREEN_DIR=__STATUS_SCREEN_DIR__
+ExecStart=__STATUS_SCREEN_DIR__/.venv/bin/python __STATUS_SCREEN_DIR__/pi/status_multi.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
