@@ -55,6 +55,18 @@ Notes:
 - Calendar events still win during scheduled meetings.
 - `WORK_HOURS_DAYS` supports comma-separated days or ranges (e.g., `Mon,Wed,Fri` or `Mon-Fri`).
 
+## Microsoft busy status
+
+If your Outlook calendar includes Microsoft busy status values (free/busy/out of office), you can
+use them to decide whether an event should trigger a meeting or out-of-office state:
+
+```bash
+USE_MS_BUSY_STATUS="true"
+```
+
+With this enabled, `X-MICROSOFT-CDO-BUSYSTATUS=FREE` events are ignored, and `OOF` events are treated
+as out of office even if the event title does not include OOO keywords.
+
 ## ICS refresh caching
 
 To avoid fetching the calendar on every poll, the service caches the last ICS file and reuses it until the refresh timer expires:
