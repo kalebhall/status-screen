@@ -241,15 +241,15 @@
         nextEvent.textContent = "";
         return;
       }
-      if (!isSameDay(nextTime, now, currentTimeZone)) {
+      if (!isSameDay(nextTime, now)) {
         nextEvent.textContent = "";
         return;
       }
-      if (!isWithinWorkHours(nextTime, currentTimeZone)) {
+      if (!isWithinWorkHours(nextTime)) {
         nextEvent.textContent = "";
         return;
       }
-      const formattedTime = formatTime(nextTime, currentTimeZone);
+      const formattedTime = formatTime(nextTime);
       nextEvent.textContent = `Next event at ${formattedTime}`;
     }
 

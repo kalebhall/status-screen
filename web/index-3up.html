@@ -202,7 +202,7 @@
       return parts.hour >= WORKDAY_START && parts.hour < WORKDAY_END;
     }
 
-    function shouldShowNextEvent(nextEventAt, timeZone) {
+    function shouldShowNextEvent(nextEventAt) {
       if (!nextEventAt) {
         return false;
       }
@@ -214,10 +214,10 @@
       if (nextTime <= now) {
         return false;
       }
-      if (!isSameDay(nextTime, now, timeZone)) {
+      if (!isSameDay(nextTime, now)) {
         return false;
       }
-      return isWithinWorkHours(nextTime, timeZone);
+      return isWithinWorkHours(nextTime);
     }
 
     function setRow(index, person) {
@@ -227,8 +227,8 @@
       const state = person.state || "error";
       rows[index].name.textContent = person.name || `Person ${index + 1}`;
       rows[index].detail.textContent = person.detail || "";
-      rows[index].meta.textContent = shouldShowNextEvent(person.next_event_at, person.time_zone)
-        ? `Next event at ${formatTime(new Date(person.next_event_at), person.time_zone)}`
+      rows[index].meta.textContent = shouldShowNextEvent(person.next_event_at)
+        ? `Next event at ${formatTime(new Date(person.next_event_at))}`
         : "";
       rows[index].status.textContent = person.label || state.toUpperCase();
       rows[index].status.className = `status-tag status-${state}`;
