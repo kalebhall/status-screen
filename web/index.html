@@ -86,6 +86,39 @@
       countdown.textContent = `Ends in ${formatCountdown(remaining)}`;
     }
 
+    function parseTimeZoneOffset(timeZone) {
+      if (!timeZone) {
+        return null;
+      }
+      const match = timeZone.match(/^(?:UTC|GMT)\s*([+-])\s*(\d{1,2})(?::?(\d{2}))?$/i);
+      if (!match) {
+        return null;
+      }
+      const sign = match[1] === "-" ? -1 : 1;
+      const hours = Number.parseInt(match[2], 10);
+      const minutes = match[3] ? Number.parseInt(match[3], 10) : 0;
+      if (Number.isNaN(hours) || Number.isNaN(minutes) || hours > 14 || minutes > 59) {
+        return null;
+      }
+      return sign * (hours * 60 + minutes);
+    }
+
+    function formatTimeWithOffset(date, offsetMinutes, options) {
+      const adjusted = new Date(date.getTime() + offsetMinutes * 60 * 1000);
+      return adjusted.toLocaleTimeString("en-US", {
+        ...options,
+        timeZone: "UTC",
+      });
+    }
+
+    function formatDateWithOffset(date, offsetMinutes, options) {
+      const adjusted = new Date(date.getTime() + offsetMinutes * 60 * 1000);
+      return adjusted.toLocaleDateString("en-US", {
+        ...options,
+        timeZone: "UTC",
+      });
+    }
+
     function formatTime(date, timeZone) {
       const baseOptions = {
         hour: "numeric",
@@ -93,6 +126,10 @@
         hour12: true,
       };
       if (timeZone) {
+        const offsetMinutes = parseTimeZoneOffset(timeZone);
+        if (offsetMinutes !== null) {
+          return formatTimeWithOffset(date, offsetMinutes, baseOptions);
+        }
         try {
           return date.toLocaleTimeString("en-US", {
             ...baseOptions,
@@ -112,6 +149,10 @@
         year: "numeric",
       };
       if (timeZone) {
+        const offsetMinutes = parseTimeZoneOffset(timeZone);
+        if (offsetMinutes !== null) {
+          return formatDateWithOffset(date, offsetMinutes, baseOptions);
+        }
         try {
           return date.toLocaleDateString("en-US", {
             ...baseOptions,
