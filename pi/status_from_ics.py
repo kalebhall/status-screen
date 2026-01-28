@@ -275,6 +275,7 @@ def write_status(
         "label": label,
         "detail": detail,
         "source": source,
+        "time_zone": TIMEZONE_NAME,
         "updated": datetime.now().isoformat(timespec="seconds"),
     }
     if until:

@@ -44,6 +44,7 @@
     let currentUntil = null;
     let currentState = "available";
     let currentNextEventAt = null;
+    let currentTimeZone = null;
 
     const iconByState = {
       available: "✅",
@@ -85,20 +86,42 @@
       countdown.textContent = `Ends in ${formatCountdown(remaining)}`;
     }
 
-    function formatTime(date) {
-      return date.toLocaleTimeString("en-US", {
+    function formatTime(date, timeZone) {
+      const baseOptions = {
         hour: "numeric",
         minute: "2-digit",
         hour12: true,
-      });
+      };
+      if (timeZone) {
+        try {
+          return date.toLocaleTimeString("en-US", {
+            ...baseOptions,
+            timeZone,
+          });
+        } catch (error) {
+          return date.toLocaleTimeString("en-US", baseOptions);
+        }
+      }
+      return date.toLocaleTimeString("en-US", baseOptions);
     }
 
-    function formatDate(date) {
-      return date.toLocaleDateString("en-US", {
+    function formatDate(date, timeZone) {
+      const baseOptions = {
         month: "2-digit",
         day: "2-digit",
         year: "numeric",
-      });
+      };
+      if (timeZone) {
+        try {
+          return date.toLocaleDateString("en-US", {
+            ...baseOptions,
+            timeZone,
+          });
+        } catch (error) {
+          return date.toLocaleDateString("en-US", baseOptions);
+        }
+      }
+      return date.toLocaleDateString("en-US", baseOptions);
     }
 
     function updateNextEvent(nextEventAt, state) {
@@ -111,13 +134,13 @@
         nextEvent.textContent = "";
         return;
       }
-      const formattedTime = formatTime(nextTime);
+      const formattedTime = formatTime(nextTime, currentTimeZone);
       nextEvent.textContent = `Next event at ${formattedTime}`;
     }
 
     function updateClock() {
       const now = new Date();
-      footer.textContent = `${formatDate(now)} ${formatTime(now)}`;
+      footer.textContent = `${formatDate(now, currentTimeZone)} ${formatTime(now, currentTimeZone)}`;
     }
 
     async function loadStatus() {
@@ -131,6 +154,7 @@
         detail.textContent = data.detail || "";
         currentUntil = data.until || null;
         currentNextEventAt = data.next_event_at || null;
+        currentTimeZone = data.time_zone || null;
         currentState = state;
         updateCountdown(currentUntil, currentState);
         updateNextEvent(currentNextEventAt, currentState);
