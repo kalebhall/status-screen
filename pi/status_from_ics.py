@@ -82,6 +82,7 @@ WORK_HOURS_DAYS = os.environ.get("WORK_HOURS_DAYS", "")
 OOO_KEYWORDS = ["out of office", "ooo", "vacation", "leave", "pto", "sick"]
 IGNORE_KEYWORDS = ["cancelled", "canceled"]
 ALLDAY_ONLY_COUNTS_IF_OOO = parse_env_bool("ALLDAY_ONLY_COUNTS_IF_OOO", True)
+USE_MS_BUSY_STATUS = parse_env_bool("USE_MS_BUSY_STATUS", False)
 
 DAY_NAME_TO_INDEX = {
     "mon": 0,
@@ -399,6 +400,39 @@ def event_times_to_utc(ev_begin, ev_end, local_tz) -> tuple[datetime, datetime]:
         end = end.replace(tzinfo=local_tz)
     return start.astimezone(timezone.utc), end.astimezone(timezone.utc)
 
+def extract_event_extra_values(event):
+    for container in (getattr(event, "extra", None), getattr(event, "_unused", None)):
+        if not container:
+            continue
+        if isinstance(container, dict):
+            for key, value in container.items():
+                yield key, value
+            continue
+        for item in container:
+            if isinstance(item, tuple) and len(item) >= 2:
+                yield item[0], item[1]
+                continue
+            name = getattr(item, "name", None) or getattr(item, "_name", None)
+            value = getattr(item, "value", None) or getattr(item, "_value", None)
+            if name is not None:
+                yield name, value
+
+def microsoft_busy_status(event) -> str | None:
+    for name, value in extract_event_extra_values(event):
+        if not name:
+            continue
+        if str(name).strip().upper() != "X-MICROSOFT-CDO-BUSYSTATUS":
+            continue
+        raw_value = "" if value is None else str(value)
+        status = raw_value.strip().lower()
+        if status in {"free", "busy"}:
+            return status
+        if status in {"oof", "out of office", "outofoffice"}:
+            return "ooo"
+        if status:
+            return status
+    return None
+
 def is_all_day_event(e) -> bool:
     try:
         start = e.begin.datetime
@@ -435,14 +469,18 @@ def current_calendar_event(ics_text: str) -> dict | None:
             continue
 
         if start_utc <= now < end_utc:
-            if ALLDAY_ONLY_COUNTS_IF_OOO and is_all_day_event(e) and not is_ooo(name):
+            busy_status = microsoft_busy_status(e) if USE_MS_BUSY_STATUS else None
+            event_is_ooo = is_ooo(name) or busy_status == "ooo"
+            if ALLDAY_ONLY_COUNTS_IF_OOO and is_all_day_event(e) and not event_is_ooo:
                 continue
-            active.append((start_utc, end_utc, name))
+            if busy_status == "free":
+                continue
+            active.append((start_utc, end_utc, name, busy_status))
 
     if not active:
         return None
     active.sort(key=lambda x: x[0])
-    return {"name": active[0][2], "end": active[0][1]}
+    return {"name": active[0][2], "end": active[0][1], "busy_status": active[0][3]}
 
 def next_calendar_event(ics_text: str) -> dict | None:
     from ics import Calendar
@@ -469,7 +507,11 @@ def next_calendar_event(ics_text: str) -> dict | None:
             continue
         if start_utc <= now:
             continue
-        if ALLDAY_ONLY_COUNTS_IF_OOO and is_all_day_event(e) and not is_ooo(name):
+        busy_status = microsoft_busy_status(e) if USE_MS_BUSY_STATUS else None
+        event_is_ooo = is_ooo(name) or busy_status == "ooo"
+        if ALLDAY_ONLY_COUNTS_IF_OOO and is_all_day_event(e) and not event_is_ooo:
+            continue
+        if busy_status == "free":
             continue
         upcoming.append((start_utc, end_utc, name))
 
@@ -490,7 +532,17 @@ def resolve_and_write():
         if ev:
             name = ev["name"]
             until = ev["end"].isoformat().replace("+00:00", "Z")
-            if is_ooo(name):
+            busy_status = ev.get("busy_status")
+            if USE_MS_BUSY_STATUS and busy_status == "ooo":
+                write_status(
+                    "ooo",
+                    "OUT OF OFFICE",
+                    name,
+                    source="calendar",
+                    until=until,
+                    next_event_at=next_event_at,
+                )
+            elif is_ooo(name):
                 write_status(
                     "ooo",
                     "OUT OF OFFICE",
