@@ -152,6 +152,74 @@
       return date.toLocaleDateString("en-US", baseOptions);
     }
 
+    function getZonedParts(date, timeZone) {
+      if (timeZone) {
+        try {
+          const parts = new Intl.DateTimeFormat("en-US", {
+            timeZone,
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+          }).formatToParts(date);
+          const lookup = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+          return {
+            year: Number.parseInt(lookup.year, 10),
+            month: Number.parseInt(lookup.month, 10) - 1,
+            day: Number.parseInt(lookup.day, 10),
+            hour: Number.parseInt(lookup.hour, 10),
+            minute: Number.parseInt(lookup.minute, 10),
+          };
+        } catch (error) {
+          // Fall through to local time
+        }
+      }
+      return {
+        year: date.getFullYear(),
+        month: date.getMonth(),
+        day: date.getDate(),
+        hour: date.getHours(),
+        minute: date.getMinutes(),
+      };
+    }
+
+    function isSameDay(first, second, timeZone) {
+      const firstParts = getZonedParts(first, timeZone);
+      const secondParts = getZonedParts(second, timeZone);
+      return (
+        firstParts.year === secondParts.year &&
+        firstParts.month === secondParts.month &&
+        firstParts.day === secondParts.day
+      );
+    }
+
+    function isWithinWorkHours(date, timeZone) {
+      const WORKDAY_START = 9;
+      const WORKDAY_END = 17;
+      const parts = getZonedParts(date, timeZone);
+      return parts.hour >= WORKDAY_START && parts.hour < WORKDAY_END;
+    }
+
+    function shouldShowNextEvent(nextEventAt, timeZone) {
+      if (!nextEventAt) {
+        return false;
+      }
+      const nextTime = new Date(nextEventAt);
+      if (Number.isNaN(nextTime.getTime())) {
+        return false;
+      }
+      const now = new Date();
+      if (nextTime <= now) {
+        return false;
+      }
+      if (!isSameDay(nextTime, now, timeZone)) {
+        return false;
+      }
+      return isWithinWorkHours(nextTime, timeZone);
+    }
+
     function setRow(index, person) {
       if (!rows[index]) {
         return;
@@ -159,7 +227,7 @@
       const state = person.state || "error";
       rows[index].name.textContent = person.name || `Person ${index + 1}`;
       rows[index].detail.textContent = person.detail || "";
-      rows[index].meta.textContent = person.next_event_at
+      rows[index].meta.textContent = shouldShowNextEvent(person.next_event_at, person.time_zone)
         ? `Next event at ${formatTime(new Date(person.next_event_at), person.time_zone)}`
         : "";
       rows[index].status.textContent = person.label || state.toUpperCase();
