@@ -73,9 +73,19 @@ To avoid fetching the calendar on every poll, the service caches the last ICS fi
 
 ```bash
 ICS_REFRESH_SECONDS="300"
+# or
+ICS_REFRESH="300"
 ```
 
 By default the cached file is stored at `/home/pi/status-screen/calendar.ics`. You can override the path with `ICS_CACHE_PATH` if needed.
+
+## Hide calendar event titles
+
+If you prefer to keep meeting titles off the display, disable event details:
+
+```bash
+SHOW_EVENT_DETAILS="false"
+```
 
 ## Custom CA certificates (Fortigate DPI, etc.)
 

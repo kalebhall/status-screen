@@ -66,7 +66,9 @@ configure_logging()
 ICS_URL = os.environ.get("ICS_URL", "")
 TIMEZONE_NAME = os.environ.get("TIMEZONE_NAME", "America/Los_Angeles")
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "60"))
-ICS_REFRESH_SECONDS = int(os.environ.get("ICS_REFRESH_SECONDS", "300"))
+ICS_REFRESH_SECONDS = int(
+    os.environ.get("ICS_REFRESH_SECONDS", os.environ.get("ICS_REFRESH", "300"))
+)
 ICS_CACHE_PATH = os.environ.get(
     "ICS_CACHE_PATH", os.path.join(RUNTIME_DIR, "calendar.ics")
 )
@@ -83,6 +85,7 @@ OOO_KEYWORDS = ["out of office", "ooo", "vacation", "leave", "pto", "sick"]
 IGNORE_KEYWORDS = ["cancelled", "canceled"]
 ALLDAY_ONLY_COUNTS_IF_OOO = parse_env_bool("ALLDAY_ONLY_COUNTS_IF_OOO", True)
 USE_MS_BUSY_STATUS = parse_env_bool("USE_MS_BUSY_STATUS", False)
+SHOW_EVENT_DETAILS = parse_env_bool("SHOW_EVENT_DETAILS", True)
 
 DAY_NAME_TO_INDEX = {
     "mon": 0,
@@ -531,13 +534,14 @@ def resolve_and_write():
             next_event_at = next_ev["start"].isoformat().replace("+00:00", "Z")
         if ev:
             name = ev["name"]
+            detail = name if SHOW_EVENT_DETAILS else ""
             until = ev["end"].isoformat().replace("+00:00", "Z")
             busy_status = ev.get("busy_status")
             if USE_MS_BUSY_STATUS and busy_status == "ooo":
                 write_status(
                     "ooo",
                     "OUT OF OFFICE",
-                    name,
+                    detail,
                     source="calendar",
                     until=until,
                     next_event_at=next_event_at,
@@ -546,7 +550,7 @@ def resolve_and_write():
                 write_status(
                     "ooo",
                     "OUT OF OFFICE",
-                    name,
+                    detail,
                     source="calendar",
                     until=until,
                     next_event_at=next_event_at,
@@ -555,7 +559,7 @@ def resolve_and_write():
                 write_status(
                     "meeting",
                     "IN A MEETING",
-                    name,
+                    detail,
                     source="calendar",
                     until=until,
                     next_event_at=next_event_at,
