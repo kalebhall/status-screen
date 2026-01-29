@@ -3,6 +3,7 @@ import logging
 import os
 import time
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 RUNTIME_DIR = os.environ.get("STATUS_SCREEN_DIR", "/home/pi/status-screen")
@@ -188,10 +189,61 @@ def now_local(local_tz) -> datetime:
 def get_local_tz():
     from dateutil import tz
 
-    local_tz = tz.gettz(TIMEZONE_NAME)
+    local_tz = resolve_tzinfo(TIMEZONE_NAME)
     if local_tz is None:
         logging.error("Invalid TIMEZONE_NAME=%s", TIMEZONE_NAME)
     return local_tz
+
+WINDOWS_TZ_MAP = {
+    "pacific standard time": "America/Los_Angeles",
+    "mountain standard time": "America/Denver",
+    "central standard time": "America/Chicago",
+    "eastern standard time": "America/New_York",
+    "utc": "UTC",
+    "pacific time (us & canada)": "America/Los_Angeles",
+    "mountain time (us & canada)": "America/Denver",
+    "central time (us & canada)": "America/Chicago",
+    "eastern time (us & canada)": "America/New_York",
+}
+
+def normalize_tz_key(value: str | None) -> str:
+    if not value:
+        return ""
+    lowered = value.strip().lower()
+    if lowered.startswith("(utc") and ")" in lowered:
+        lowered = lowered.split(")", 1)[1].strip()
+    return lowered
+
+def map_windows_tz(value: str | None) -> str | None:
+    key = normalize_tz_key(value)
+    if not key:
+        return None
+    return WINDOWS_TZ_MAP.get(key)
+
+@lru_cache(maxsize=64)
+def resolve_tzinfo(name: str | None):
+    from dateutil import tz
+
+    if not name:
+        return None
+    tzinfo = tz.gettz(name)
+    if tzinfo is not None:
+        return tzinfo
+    mapped = map_windows_tz(name)
+    if mapped:
+        return tz.gettz(mapped)
+    return None
+
+def coerce_event_timezone(dt: datetime, local_tz) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=local_tz)
+    tzname = dt.tzinfo.tzname(dt)
+    mapped = map_windows_tz(tzname)
+    if mapped:
+        mapped_tz = resolve_tzinfo(mapped)
+        if mapped_tz:
+            return dt.replace(tzinfo=mapped_tz)
+    return dt
 
 def parse_hhmm(value: str) -> tuple[int, int] | None:
     try:
@@ -482,10 +534,8 @@ def event_times_to_local(ev_begin, ev_end, local_tz) -> tuple[datetime, datetime
     end = ev_end.datetime
     if start is None or end is None:
         raise ValueError("Event start/end missing")
-    if start.tzinfo is None:
-        start = start.replace(tzinfo=local_tz)
-    if end.tzinfo is None:
-        end = end.replace(tzinfo=local_tz)
+    start = coerce_event_timezone(start, local_tz)
+    end = coerce_event_timezone(end, local_tz)
     return start.astimezone(local_tz), end.astimezone(local_tz)
 
 def extract_event_extra_values(event):
