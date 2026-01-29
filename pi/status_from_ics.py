@@ -598,8 +598,14 @@ def current_calendar_event(ics_text: str) -> dict | None:
         logging.exception("Failed to parse ICS calendar")
         return None
 
+    try:
+        timeline_events = list(cal.timeline.at(now))
+    except Exception:
+        logging.debug("Failed to read timeline events for current time", exc_info=True)
+        timeline_events = None
+
     active = []
-    for e in cal.events:
+    for e in (timeline_events if timeline_events is not None else cal.events):
         name = e.name or "Meeting"
         if should_ignore(name):
             continue
@@ -635,6 +641,33 @@ def next_calendar_event(ics_text: str) -> dict | None:
     except Exception:
         logging.exception("Failed to parse ICS calendar")
         return None
+    try:
+        timeline_events = cal.timeline.start_after(now)
+    except Exception:
+        logging.debug("Failed to read timeline events after current time", exc_info=True)
+        timeline_events = None
+
+    if timeline_events is not None:
+        for e in timeline_events:
+            name = e.name or "Meeting"
+            if should_ignore(name):
+                continue
+            try:
+                start_local, end_local = event_times_to_local(e.begin, e.end, local_tz)
+            except Exception:
+                logging.debug("Failed to parse event times for %s", name)
+                continue
+            if start_local <= now:
+                continue
+            busy_status = microsoft_busy_status(e) if USE_MS_BUSY_STATUS else None
+            event_is_ooo = is_ooo(name) or busy_status == "ooo"
+            if ALLDAY_ONLY_COUNTS_IF_OOO and is_all_day_event(e) and not event_is_ooo:
+                continue
+            if busy_status == "free":
+                continue
+            return {"name": name, "start": start_local}
+        return None
+
     upcoming = []
 
     for e in cal.events:
