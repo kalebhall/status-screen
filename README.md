@@ -93,6 +93,7 @@ ICS_REFRESH="300"
 ```
 
 By default the cached file is stored at `/home/pi/status-screen/calendar.ics`. You can override the path with `ICS_CACHE_PATH` if needed.
+When using multiple groups (`ICS_URLS`), each group/person gets its own cache file derived from the base path (for example, `calendar-1.ics`, `calendar-2.ics`).
 
 ## Hide calendar event titles
 
