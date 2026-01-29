@@ -54,6 +54,7 @@ Notes:
 - Working hours are evaluated in `TIMEZONE_NAME`.
 - Calendar events still win during scheduled meetings.
 - `WORK_HOURS_DAYS` supports comma-separated days or ranges (e.g., `Mon,Wed,Fri` or `Mon-Fri`).
+- `TIMEZONE_NAME` accepts IANA names (like `America/Los_Angeles`) and common Windows names (like `Pacific Standard Time`).
 
 ### Working hours per group
 
