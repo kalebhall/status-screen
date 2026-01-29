@@ -114,6 +114,9 @@ def build_groups() -> list[dict]:
         single_token = os.environ.get("AUTH_TOKEN", "").strip()
         if single_token:
             auth_tokens = [single_token]
+    work_hour_starts = parse_env_list("WORK_HOURS_STARTS")
+    work_hour_ends = parse_env_list("WORK_HOURS_ENDS")
+    work_hour_days = parse_env_list("WORK_HOURS_DAYS_LIST")
 
     group_count = len(ics_urls) if ics_urls else 1
     if len(display_names) > group_count or len(auth_tokens) > group_count:
@@ -139,6 +142,9 @@ def build_groups() -> list[dict]:
                 else os.path.join(RUNTIME_DIR, f"status-{index + 1}.json")
             )
             override_path = os.path.join(RUNTIME_DIR, f"override-{index + 1}.json")
+        start_value = work_hour_starts[index] if index < len(work_hour_starts) else WORK_HOURS_START
+        end_value = work_hour_ends[index] if index < len(work_hour_ends) else WORK_HOURS_END
+        days_value = work_hour_days[index] if index < len(work_hour_days) else WORK_HOURS_DAYS
         groups.append(
             {
                 "index": index,
@@ -148,6 +154,7 @@ def build_groups() -> list[dict]:
                 "cache_path": cache_path,
                 "status_path": status_path,
                 "override_path": override_path,
+                "work_hours": build_work_hours_config(start_value, end_value, days_value, index),
             }
         )
     return groups
@@ -237,21 +244,29 @@ def parse_days(value: str) -> set[int]:
             days.add(day_index)
     return days or set(range(0, 5))
 
-def build_work_hours_config() -> dict | None:
-    if not WORK_HOURS_START or not WORK_HOURS_END:
+def build_work_hours_config(
+    work_hours_start: str,
+    work_hours_end: str,
+    work_hours_days: str,
+    group_index: int | None = None,
+) -> dict | None:
+    if not work_hours_start or not work_hours_end:
         return None
-    start = parse_hhmm(WORK_HOURS_START)
-    end = parse_hhmm(WORK_HOURS_END)
+    start = parse_hhmm(work_hours_start)
+    end = parse_hhmm(work_hours_end)
     if not start or not end:
+        suffix = f" (group {group_index + 1})" if group_index is not None else ""
         logging.warning(
-            "Invalid work hours config: start=%s end=%s",
-            WORK_HOURS_START,
-            WORK_HOURS_END,
+            "Invalid work hours config%s: start=%s end=%s",
+            suffix,
+            work_hours_start,
+            work_hours_end,
         )
         return None
-    days = parse_days(WORK_HOURS_DAYS)
+    days = parse_days(work_hours_days)
     if not days:
-        logging.warning("Invalid work hours days: %s", WORK_HOURS_DAYS)
+        suffix = f" (group {group_index + 1})" if group_index is not None else ""
+        logging.warning("Invalid work hours days%s: %s", suffix, work_hours_days)
         return None
     start_minutes = start[0] * 60 + start[1]
     end_minutes = end[0] * 60 + end[1]
@@ -263,8 +278,6 @@ def build_work_hours_config() -> dict | None:
         "end_minutes": end_minutes,
         "overnight": end_minutes <= start_minutes,
     }
-
-WORK_HOURS = build_work_hours_config()
 
 def is_within_work_hours(now_local: datetime, config: dict) -> bool:
     minutes = now_local.hour * 60 + now_local.minute
@@ -302,8 +315,7 @@ def format_work_hours_detail(config: dict) -> str:
     end_hour, end_minute = config["end"]
     return f"Outside working hours ({start_hour:02d}:{start_minute:02d}-{end_hour:02d}:{end_minute:02d})"
 
-def working_hours_status(now: datetime | None = None) -> dict | None:
-    config = WORK_HOURS
+def working_hours_status(config: dict | None, now: datetime | None = None) -> dict | None:
     if not config:
         return None
     local_tz = get_local_tz()
@@ -656,7 +668,7 @@ def resolve_and_write(group: dict) -> dict:
             status_path=group["status_path"],
         )
 
-    work_status = working_hours_status()
+    work_status = working_hours_status(group.get("work_hours"))
     if work_status:
         return write_status(
             work_status["state"],
