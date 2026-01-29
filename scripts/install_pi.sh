@@ -30,7 +30,7 @@ sudo -u "$STATUS_SCREEN_USER" "$RUNTIME_DIR/.venv/bin/pip" install requests ics 
 
 # Web
 sudo rm -rf /var/www/html/*
-sudo cp "$RUNTIME_DIR/web/"*.html /var/www/html/
+sudo ln -sfn "$RUNTIME_DIR/web/index.html" /var/www/html/index.html
 sudo chown -R www-data:www-data /var/www/html
 sudo chmod -R 755 /var/www/html
 
