@@ -2,49 +2,98 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=1920, height=480, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0" />
   <title>Status Display</title>
   <style>
-    body { margin:0; font-family: Arial, sans-serif; background:black; color:white; overflow:hidden; }
-    .bar { width: 1920px; height: 480px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-weight:bold; text-transform:uppercase; }
-    .label { font-size: 140px; line-height: 1.0; }
-    .label-row { display:flex; align-items:center; gap: 30px; }
-    .status-icon { font-size: 120px; line-height: 1.0; filter: drop-shadow(0 4px 4px rgba(0,0,0,0.35)); }
-    .detail { font-size: 64px; opacity: 0.9; margin-top: 10px; text-transform:none; }
-    .next-event { font-size: 52px; opacity: 0.85; margin-top: 12px; text-transform:none; }
-    .countdown { font-size: 52px; opacity: 0.85; margin-top: 12px; text-transform:none; }
-    .available { background:#00a651; }
-    .busy { background:#c0392b; }
-    .meeting { background:#2980b9; }
-    .ooo { background:#8e44ad; }
-    .error { background:#7f8c8d; }
-    .footer { position:absolute; bottom:20px; right:40px; font-size:42px; opacity:0.85; }
+    :root {
+      color-scheme: only dark;
+    }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: black;
+      color: white;
+      overflow: hidden;
+    }
+    .screen {
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      justify-content: stretch;
+    }
+    .row {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: calc(10px * var(--font-scale, 1));
+      text-align: center;
+      padding: calc(16px * var(--font-scale, 1));
+      box-sizing: border-box;
+    }
+    .row + .row {
+      border-top: 4px solid rgba(255, 255, 255, 0.2);
+    }
+    .label-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: calc(24px * var(--font-scale, 1));
+    }
+    .name {
+      font-size: calc(64px * var(--font-scale, 1));
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .label {
+      font-size: calc(140px * var(--font-scale, 1));
+      line-height: 1.0;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .status-icon {
+      font-size: calc(120px * var(--font-scale, 1));
+      line-height: 1.0;
+      filter: drop-shadow(0 4px 4px rgba(0,0,0,0.35));
+    }
+    .detail {
+      font-size: calc(64px * var(--font-scale, 1));
+      opacity: 0.9;
+      text-transform: none;
+    }
+    .next-event,
+    .countdown {
+      font-size: calc(52px * var(--font-scale, 1));
+      opacity: 0.85;
+      text-transform: none;
+    }
+    .available { background: #00a651; }
+    .busy { background: #c0392b; }
+    .meeting { background: #2980b9; }
+    .ooo { background: #8e44ad; }
+    .error { background: #7f8c8d; }
+    .footer {
+      position: absolute;
+      bottom: 20px;
+      right: 40px;
+      font-size: calc(42px * var(--font-scale, 1));
+      opacity: 0.85;
+    }
   </style>
 </head>
 <body>
-  <div id="bar" class="bar available">
-    <div class="label label-row">
-      <span id="icon" class="status-icon">●</span>
-      <span id="label">AVAILABLE</span>
-    </div>
-    <div id="detail" class="detail"></div>
-    <div id="next-event" class="next-event"></div>
-    <div id="countdown" class="countdown"></div>
-  </div>
+  <div id="screen" class="screen"></div>
   <div id="footer" class="footer"></div>
 
   <script>
     const footer = document.getElementById("footer");
-    const bar = document.getElementById("bar");
-    const icon = document.getElementById("icon");
-    const label = document.getElementById("label");
-    const detail = document.getElementById("detail");
-    const nextEvent = document.getElementById("next-event");
-    const countdown = document.getElementById("countdown");
-    let currentUntil = null;
-    let currentState = "available";
-    let currentNextEventAt = null;
-    let currentTimeZone = null;
+    const screen = document.getElementById("screen");
+    let rows = [];
+    let rowState = [];
 
     const iconByState = {
       available: "✅",
@@ -53,6 +102,78 @@
       ooo: "✈️",
       error: "⚠️",
     };
+
+    function fontScaleFor(count) {
+      if (count <= 1) {
+        return 1;
+      }
+      if (count === 2) {
+        return 0.75;
+      }
+      if (count === 3) {
+        return 0.6;
+      }
+      if (count === 4) {
+        return 0.5;
+      }
+      return 0.4;
+    }
+
+    function createRow() {
+      const row = document.createElement("div");
+      row.className = "row available";
+
+      const name = document.createElement("div");
+      name.className = "name";
+
+      const labelRow = document.createElement("div");
+      labelRow.className = "label-row";
+
+      const icon = document.createElement("span");
+      icon.className = "status-icon";
+      icon.textContent = "●";
+
+      const label = document.createElement("span");
+      label.className = "label";
+      label.textContent = "AVAILABLE";
+
+      labelRow.appendChild(icon);
+      labelRow.appendChild(label);
+
+      const detail = document.createElement("div");
+      detail.className = "detail";
+
+      const nextEvent = document.createElement("div");
+      nextEvent.className = "next-event";
+
+      const countdown = document.createElement("div");
+      countdown.className = "countdown";
+
+      row.appendChild(name);
+      row.appendChild(labelRow);
+      row.appendChild(detail);
+      row.appendChild(nextEvent);
+      row.appendChild(countdown);
+
+      return { row, name, icon, label, detail, nextEvent, countdown };
+    }
+
+    function setRowCount(count) {
+      const targetCount = Math.max(1, count);
+      if (rows.length === targetCount) {
+        return;
+      }
+      screen.innerHTML = "";
+      rows = [];
+      rowState = [];
+      for (let i = 0; i < targetCount; i += 1) {
+        const row = createRow();
+        rows.push(row);
+        rowState.push({ until: null, state: "available", nextEventAt: null, timeZone: null });
+        screen.appendChild(row.row);
+      }
+      screen.style.setProperty("--font-scale", fontScaleFor(targetCount));
+    }
 
     function formatCountdown(msRemaining) {
       const totalSeconds = Math.max(0, Math.floor(msRemaining / 1000));
@@ -68,22 +189,26 @@
       return `${seconds}s`;
     }
 
-    function updateCountdown(untilIso, state) {
-      if (!untilIso || ["available", "ooo"].includes(state)) {
-        countdown.textContent = "";
+    function updateCountdown(index) {
+      const state = rowState[index];
+      const row = rows[index];
+      if (!row || !state || !state.until || ["available", "ooo"].includes(state.state)) {
+        if (row) {
+          row.countdown.textContent = "";
+        }
         return;
       }
-      const endTime = new Date(untilIso);
+      const endTime = new Date(state.until);
       if (Number.isNaN(endTime.getTime())) {
-        countdown.textContent = "";
+        row.countdown.textContent = "";
         return;
       }
       const remaining = endTime.getTime() - Date.now();
       if (remaining <= 0) {
-        countdown.textContent = "Ending now";
+        row.countdown.textContent = "Ending now";
         return;
       }
-      countdown.textContent = `Ends in ${formatCountdown(remaining)}`;
+      row.countdown.textContent = `Ends in ${formatCountdown(remaining)}`;
     }
 
     function parseTimeZoneOffset(timeZone) {
@@ -226,70 +351,100 @@
       return date.toLocaleDateString("en-US", baseOptions);
     }
 
-    function updateNextEvent(nextEventAt, state) {
-      if (!nextEventAt || state === "ooo") {
-        nextEvent.textContent = "";
+    function updateNextEvent(index) {
+      const state = rowState[index];
+      const row = rows[index];
+      if (!row || !state || !state.nextEventAt || state.state === "ooo") {
+        if (row) {
+          row.nextEvent.textContent = "";
+        }
         return;
       }
-      const nextTime = new Date(nextEventAt);
+      const nextTime = new Date(state.nextEventAt);
       if (Number.isNaN(nextTime.getTime())) {
-        nextEvent.textContent = "";
+        row.nextEvent.textContent = "";
         return;
       }
       const now = new Date();
       if (nextTime <= now) {
-        nextEvent.textContent = "";
+        row.nextEvent.textContent = "";
         return;
       }
-      if (!isSameDay(nextTime, now)) {
-        nextEvent.textContent = "";
+      if (!isSameDay(nextTime, now, state.timeZone)) {
+        row.nextEvent.textContent = "";
         return;
       }
-      if (!isWithinWorkHours(nextTime)) {
-        nextEvent.textContent = "";
+      if (!isWithinWorkHours(nextTime, state.timeZone)) {
+        row.nextEvent.textContent = "";
         return;
       }
-      const formattedTime = formatTime(nextTime);
-      nextEvent.textContent = `Next event at ${formattedTime}`;
+      const formattedTime = formatTime(nextTime, state.timeZone);
+      row.nextEvent.textContent = `Next event at ${formattedTime}`;
     }
 
     function updateClock() {
       const now = new Date();
-      footer.textContent = `${formatDate(now, currentTimeZone)} ${formatTime(now, currentTimeZone)}`;
+      const zone = rowState[0] ? rowState[0].timeZone : null;
+      footer.textContent = `${formatDate(now, zone)} ${formatTime(now, zone)}`;
+    }
+
+    function updateRow(index, person) {
+      const row = rows[index];
+      if (!row) {
+        return;
+      }
+      const state = person.state || "error";
+      row.row.className = `row ${state}`;
+      row.icon.textContent = iconByState[state] || "●";
+      row.label.textContent = person.label || "UNKNOWN";
+      row.detail.textContent = person.detail || "";
+      row.name.textContent = person.name || `Group ${index + 1}`;
+      rowState[index] = {
+        until: person.until || null,
+        state,
+        nextEventAt: person.next_event_at || null,
+        timeZone: person.time_zone || null,
+      };
+      updateCountdown(index);
+      updateNextEvent(index);
+    }
+
+    async function fetchStatusPayload() {
+      try {
+        const r = await fetch("/status-multi.json?cache=" + Date.now());
+        if (!r.ok) {
+          throw new Error(`status-multi.json ${r.status}`);
+        }
+        return await r.json();
+      } catch (error) {
+        try {
+          const r = await fetch("/status.json?cache=" + Date.now());
+          if (!r.ok) {
+            throw new Error(`status.json ${r.status}`);
+          }
+          return await r.json();
+        } catch (fallbackError) {
+          return null;
+        }
+      }
     }
 
     async function loadStatus() {
-      try {
-        const r = await fetch("/status.json?cache=" + Date.now());
-        const data = await r.json();
-        const state = data.state || "error";
-        bar.className = "bar " + state;
-        icon.textContent = iconByState[state] || "●";
-        label.textContent = data.label || "UNKNOWN";
-        detail.textContent = data.detail || "";
-        currentUntil = data.until || null;
-        currentNextEventAt = data.next_event_at || null;
-        currentTimeZone = data.time_zone || null;
-        currentState = state;
-        updateCountdown(currentUntil, currentState);
-        updateNextEvent(currentNextEventAt, currentState);
-      } catch (e) {
-        bar.className = "bar error";
-        icon.textContent = iconByState.error;
-        label.textContent = "STATUS ERROR";
-        detail.textContent = "";
-        nextEvent.textContent = "";
-        countdown.textContent = "";
-        currentUntil = null;
-        currentNextEventAt = null;
-        currentState = "error";
+      const data = await fetchStatusPayload();
+      if (!data) {
+        setRowCount(1);
+        updateRow(0, { state: "error", label: "STATUS ERROR", detail: "" });
+        return;
       }
+      const people = Array.isArray(data.people) ? data.people : [data];
+      setRowCount(people.length);
+      people.forEach((person, index) => updateRow(index, person));
     }
 
     setInterval(updateClock, 1000);
     setInterval(loadStatus, 2000);
-    setInterval(() => updateCountdown(currentUntil, currentState), 1000);
-    setInterval(() => updateNextEvent(currentNextEventAt, currentState), 1000);
+    setInterval(() => rows.forEach((_, index) => updateCountdown(index)), 1000);
+    setInterval(() => rows.forEach((_, index) => updateNextEvent(index)), 1000);
     updateClock();
     loadStatus();
   </script>
