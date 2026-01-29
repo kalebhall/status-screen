@@ -160,6 +160,8 @@ Optional parameters let you tune polling and the busy label:
 .\windows\status_agent.ps1 -PiBaseUrl "http://<pi-ip>" -Token "<AUTH_TOKEN>" -PollSeconds 10 -BusyMinutes 5 -BusyDetail "On a call (mic active)"
 ```
 
+Calendar BUSY/IN A MEETING states take priority over the mic-active override.
+
 ## Kiosk mode (full-screen display)
 
 For a dedicated status display, launch Chromium in kiosk mode on the Pi:
