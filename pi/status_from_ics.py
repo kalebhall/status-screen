@@ -110,6 +110,9 @@ DAY_NAME_TO_INDEX = {
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
+def now_local(local_tz) -> datetime:
+    return datetime.now(local_tz)
+
 def get_local_tz():
     from dateutil import tz
 
@@ -241,13 +244,13 @@ def working_hours_status(now: datetime | None = None) -> dict | None:
     local_tz = get_local_tz()
     if local_tz is None:
         return None
-    current_local = (now or now_utc()).astimezone(local_tz)
+    current_local = (now or now_local(local_tz)).astimezone(local_tz)
     if is_within_work_hours(current_local, config):
         return None
     next_start_local = next_work_start(current_local, config)
     until = None
     if next_start_local:
-        until = next_start_local.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        until = next_start_local.isoformat()
     return {
         "state": "ooo",
         "label": "OUT OF OFFICE",
@@ -256,13 +259,13 @@ def working_hours_status(now: datetime | None = None) -> dict | None:
         "source": "working_hours",
     }
 
-def parse_iso(dt_str: str) -> datetime | None:
+def parse_iso(dt_str: str, local_tz) -> datetime | None:
     try:
         s = dt_str.replace("Z", "+00:00")
         dt = datetime.fromisoformat(s)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
+            dt = dt.replace(tzinfo=local_tz)
+        return dt.astimezone(local_tz)
     except Exception:
         return None
 
@@ -307,10 +310,13 @@ def load_override() -> dict | None:
     try:
         with open(OVERRIDE_JSON_PATH, "r") as f:
             o = json.load(f)
-        until = parse_iso(o.get("until", ""))
+        local_tz = get_local_tz()
+        if local_tz is None:
+            return None
+        until = parse_iso(o.get("until", ""), local_tz)
         if until is None:
             return None
-        if now_utc() > until:
+        if now_local(local_tz) > until:
             return None
         return o
     except Exception:
@@ -392,7 +398,7 @@ def fetch_ics_text() -> str:
             return cached_text
         raise
 
-def event_times_to_utc(ev_begin, ev_end, local_tz) -> tuple[datetime, datetime]:
+def event_times_to_local(ev_begin, ev_end, local_tz) -> tuple[datetime, datetime]:
     start = ev_begin.datetime
     end = ev_end.datetime
     if start is None or end is None:
@@ -401,7 +407,7 @@ def event_times_to_utc(ev_begin, ev_end, local_tz) -> tuple[datetime, datetime]:
         start = start.replace(tzinfo=local_tz)
     if end.tzinfo is None:
         end = end.replace(tzinfo=local_tz)
-    return start.astimezone(timezone.utc), end.astimezone(timezone.utc)
+    return start.astimezone(local_tz), end.astimezone(local_tz)
 
 def extract_event_extra_values(event):
     for container in (getattr(event, "extra", None), getattr(event, "_unused", None)):
@@ -453,7 +459,7 @@ def current_calendar_event(ics_text: str) -> dict | None:
     local_tz = get_local_tz()
     if local_tz is None:
         return None
-    now = now_utc()
+    now = now_local(local_tz)
     try:
         cal = Calendar(ics_text)
     except Exception:
@@ -466,19 +472,19 @@ def current_calendar_event(ics_text: str) -> dict | None:
         if should_ignore(name):
             continue
         try:
-            start_utc, end_utc = event_times_to_utc(e.begin, e.end, local_tz)
+            start_local, end_local = event_times_to_local(e.begin, e.end, local_tz)
         except Exception:
             logging.debug("Failed to parse event times for %s", name)
             continue
 
-        if start_utc <= now < end_utc:
+        if start_local <= now < end_local:
             busy_status = microsoft_busy_status(e) if USE_MS_BUSY_STATUS else None
             event_is_ooo = is_ooo(name) or busy_status == "ooo"
             if ALLDAY_ONLY_COUNTS_IF_OOO and is_all_day_event(e) and not event_is_ooo:
                 continue
             if busy_status == "free":
                 continue
-            active.append((start_utc, end_utc, name, busy_status))
+            active.append((start_local, end_local, name, busy_status))
 
     if not active:
         return None
@@ -491,7 +497,7 @@ def next_calendar_event(ics_text: str) -> dict | None:
     local_tz = get_local_tz()
     if local_tz is None:
         return None
-    now = now_utc()
+    now = now_local(local_tz)
     try:
         cal = Calendar(ics_text)
     except Exception:
@@ -504,11 +510,11 @@ def next_calendar_event(ics_text: str) -> dict | None:
         if should_ignore(name):
             continue
         try:
-            start_utc, end_utc = event_times_to_utc(e.begin, e.end, local_tz)
+            start_local, end_local = event_times_to_local(e.begin, e.end, local_tz)
         except Exception:
             logging.debug("Failed to parse event times for %s", name)
             continue
-        if start_utc <= now:
+        if start_local <= now:
             continue
         busy_status = microsoft_busy_status(e) if USE_MS_BUSY_STATUS else None
         event_is_ooo = is_ooo(name) or busy_status == "ooo"
@@ -516,7 +522,7 @@ def next_calendar_event(ics_text: str) -> dict | None:
             continue
         if busy_status == "free":
             continue
-        upcoming.append((start_utc, end_utc, name))
+        upcoming.append((start_local, end_local, name))
 
     if not upcoming:
         return None
@@ -531,11 +537,11 @@ def resolve_and_write():
         ev = current_calendar_event(ics_text)
         next_ev = next_calendar_event(ics_text)
         if next_ev:
-            next_event_at = next_ev["start"].isoformat().replace("+00:00", "Z")
+            next_event_at = next_ev["start"].isoformat()
         if ev:
             name = ev["name"]
             detail = name if SHOW_EVENT_DETAILS else ""
-            until = ev["end"].isoformat().replace("+00:00", "Z")
+            until = ev["end"].isoformat()
             busy_status = ev.get("busy_status")
             if USE_MS_BUSY_STATUS and busy_status == "ooo":
                 write_status(
