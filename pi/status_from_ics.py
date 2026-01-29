@@ -130,12 +130,22 @@ def build_groups() -> list[dict]:
     cache_root, cache_ext = os.path.splitext(base_cache)
     groups = []
     for index in range(group_count):
+        display_name = (
+            display_names[index]
+            if index < len(display_names)
+            else f"Group {index + 1}"
+        )
         if group_count == 1:
             cache_path = base_cache
             status_path = STATUS_JSON_PATH
             override_path = OVERRIDE_JSON_PATH
         else:
-            suffix = f"-{index + 1}"
+            safe_name = "".join(
+                ch.lower() if ch.isalnum() else "-"
+                for ch in display_name.strip()
+            ).strip("-")
+            name_suffix = f"-{safe_name}" if safe_name else ""
+            suffix = f"-{index + 1}{name_suffix}"
             cache_path = f"{cache_root}{suffix}{cache_ext}" if cache_ext else f"{base_cache}{suffix}"
             status_path = (
                 STATUS_JSON_PATH
@@ -150,7 +160,7 @@ def build_groups() -> list[dict]:
             {
                 "index": index,
                 "ics_url": ics_urls[index] if index < len(ics_urls) else "",
-                "display_name": display_names[index] if index < len(display_names) else f"Group {index + 1}",
+                "display_name": display_name,
                 "auth_token": auth_tokens[index] if index < len(auth_tokens) else "",
                 "cache_path": cache_path,
                 "status_path": status_path,
