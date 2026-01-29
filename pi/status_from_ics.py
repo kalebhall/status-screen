@@ -532,11 +532,63 @@ def fetch_ics_text(ics_url: str, cache_path: str) -> str:
             return cached_text
         raise
 
-def event_times_to_local(ev_begin, ev_end, local_tz) -> tuple[datetime, datetime]:
-    start = ev_begin.datetime
-    end = ev_end.datetime
+def iter_event_extra_items(event):
+    for container in (getattr(event, "extra", None), getattr(event, "_unused", None)):
+        if not container:
+            continue
+        if isinstance(container, dict):
+            for value in container.values():
+                yield value
+            continue
+        for item in container:
+            yield item
+
+def extract_event_tzid(event, prop_name: str) -> str | None:
+    target = prop_name.upper()
+    for item in iter_event_extra_items(event):
+        name = None
+        value_obj = item
+        if isinstance(item, tuple) and len(item) >= 2:
+            name = item[0]
+            value_obj = item[1]
+        name = name or getattr(value_obj, "name", None) or getattr(value_obj, "_name", None)
+        if not name:
+            continue
+        if str(name).strip().upper() != target:
+            continue
+        params = getattr(value_obj, "params", None) or getattr(value_obj, "_params", None)
+        if not params:
+            continue
+        tzid = params.get("TZID") or params.get("tzid")
+        if isinstance(tzid, (list, tuple)):
+            tzid = tzid[0] if tzid else None
+        if tzid:
+            return str(tzid)
+    return None
+
+def apply_event_tzid(dt: datetime, event, prop_name: str) -> datetime:
+    if dt is None:
+        return dt
+    tzid = extract_event_tzid(event, prop_name)
+    if not tzid:
+        return dt
+    tzinfo = resolve_tzinfo(tzid)
+    if tzinfo is None:
+        return dt
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=tzinfo)
+    tzname = dt.tzinfo.tzname(dt)
+    if tzname and tzname.upper() in {"UTC", "GMT"} and tzid.lower() not in {"utc", "gmt"}:
+        return dt.replace(tzinfo=tzinfo)
+    return dt
+
+def event_times_to_local(event, local_tz) -> tuple[datetime, datetime]:
+    start = event.begin.datetime
+    end = event.end.datetime
     if start is None or end is None:
         raise ValueError("Event start/end missing")
+    start = apply_event_tzid(start, event, "DTSTART")
+    end = apply_event_tzid(end, event, "DTEND")
     start = coerce_event_timezone(start, local_tz)
     end = coerce_event_timezone(end, local_tz)
     return start.astimezone(local_tz), end.astimezone(local_tz)
@@ -610,7 +662,7 @@ def current_calendar_event(ics_text: str) -> dict | None:
         if should_ignore(name):
             continue
         try:
-            start_local, end_local = event_times_to_local(e.begin, e.end, local_tz)
+            start_local, end_local = event_times_to_local(e, local_tz)
         except Exception:
             logging.debug("Failed to parse event times for %s", name)
             continue
@@ -653,7 +705,7 @@ def next_calendar_event(ics_text: str) -> dict | None:
             if should_ignore(name):
                 continue
             try:
-                start_local, end_local = event_times_to_local(e.begin, e.end, local_tz)
+                start_local, end_local = event_times_to_local(e, local_tz)
             except Exception:
                 logging.debug("Failed to parse event times for %s", name)
                 continue
@@ -675,7 +727,7 @@ def next_calendar_event(ics_text: str) -> dict | None:
         if should_ignore(name):
             continue
         try:
-            start_local, end_local = event_times_to_local(e.begin, e.end, local_tz)
+            start_local, end_local = event_times_to_local(e, local_tz)
         except Exception:
             logging.debug("Failed to parse event times for %s", name)
             continue
