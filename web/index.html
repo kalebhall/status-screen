@@ -169,7 +169,14 @@
       for (let i = 0; i < targetCount; i += 1) {
         const row = createRow();
         rows.push(row);
-        rowState.push({ until: null, state: "available", nextEventAt: null, timeZone: null });
+        rowState.push({
+          until: null,
+          state: "available",
+          nextEventAt: null,
+          detail: "",
+          source: "",
+          timeZone: null,
+        });
         screen.appendChild(row.row);
       }
       screen.style.setProperty("--font-scale", fontScaleFor(targetCount));
@@ -189,10 +196,20 @@
       return `${seconds}s`;
     }
 
+    function isMicActive(detail) {
+      return (detail || "").toLowerCase().includes("mic active");
+    }
+
     function updateCountdown(index) {
       const state = rowState[index];
       const row = rows[index];
-      if (!row || !state || !state.until || ["available", "ooo"].includes(state.state)) {
+      if (
+        !row ||
+        !state ||
+        !state.until ||
+        ["available", "ooo"].includes(state.state) ||
+        isMicActive(state.detail)
+      ) {
         if (row) {
           row.countdown.textContent = "";
         }
@@ -272,6 +289,8 @@
         until: person.until || null,
         state,
         nextEventAt: person.next_event_at || null,
+        detail: person.detail || "",
+        source: person.source || "",
       };
       updateCountdown(index);
       updateNextEvent(index);
