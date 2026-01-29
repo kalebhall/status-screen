@@ -351,6 +351,13 @@
       return date.toLocaleDateString("en-US", baseOptions);
     }
 
+    function hasExplicitTimeZone(value) {
+      if (!value || typeof value !== "string") {
+        return false;
+      }
+      return /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(value.trim());
+    }
+
     function updateNextEvent(index) {
       const state = rowState[index];
       const row = rows[index];
@@ -360,6 +367,7 @@
         }
         return;
       }
+      const displayTimeZone = hasExplicitTimeZone(state.nextEventAt) ? state.timeZone : null;
       const nextTime = new Date(state.nextEventAt);
       if (Number.isNaN(nextTime.getTime())) {
         row.nextEvent.textContent = "";
@@ -370,15 +378,15 @@
         row.nextEvent.textContent = "";
         return;
       }
-      if (!isSameDay(nextTime, now, state.timeZone)) {
+      if (!isSameDay(nextTime, now, displayTimeZone)) {
         row.nextEvent.textContent = "";
         return;
       }
-      if (!isWithinWorkHours(nextTime, state.timeZone)) {
+      if (!isWithinWorkHours(nextTime, displayTimeZone)) {
         row.nextEvent.textContent = "";
         return;
       }
-      const formattedTime = formatTime(nextTime, state.timeZone);
+      const formattedTime = formatTime(nextTime, displayTimeZone);
       row.nextEvent.textContent = `Next event at ${formattedTime}`;
     }
 
