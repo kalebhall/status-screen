@@ -405,6 +405,7 @@ def write_status(
     source: str = "",
     until: str | None = None,
     next_event_at: str | None = None,
+    name: str | None = None,
     status_path: str = STATUS_JSON_PATH,
 ):
     payload = {
@@ -419,6 +420,8 @@ def write_status(
         payload["until"] = until
     if next_event_at:
         payload["next_event_at"] = next_event_at
+    if name:
+        payload["name"] = name
     logging.debug("Writing status: %s", payload)
     os.makedirs(os.path.dirname(status_path), exist_ok=True)
     tmp = status_path + ".tmp"
@@ -683,6 +686,7 @@ def next_event_for_display(
     return start_local.isoformat()
 
 def resolve_and_write(group: dict) -> dict:
+    display_name = group.get("display_name", "")
     next_event_at = None
     error_detail = None
     try:
@@ -702,6 +706,7 @@ def resolve_and_write(group: dict) -> dict:
                     source="calendar",
                     until=until,
                     next_event_at=next_event_at,
+                    name=display_name,
                     status_path=group["status_path"],
                 )
             elif is_ooo(name):
@@ -712,6 +717,7 @@ def resolve_and_write(group: dict) -> dict:
                     source="calendar",
                     until=until,
                     next_event_at=next_event_at,
+                    name=display_name,
                     status_path=group["status_path"],
                 )
             else:
@@ -722,6 +728,7 @@ def resolve_and_write(group: dict) -> dict:
                     source="calendar",
                     until=until,
                     next_event_at=next_event_at,
+                    name=display_name,
                     status_path=group["status_path"],
                 )
     except Exception as ex:
@@ -737,6 +744,7 @@ def resolve_and_write(group: dict) -> dict:
             source="override",
             until=override.get("until"),
             next_event_at=next_event_at,
+            name=display_name,
             status_path=group["status_path"],
         )
 
@@ -749,6 +757,7 @@ def resolve_and_write(group: dict) -> dict:
             source=work_status["source"],
             until=work_status.get("until"),
             next_event_at=next_event_at,
+            name=display_name,
             status_path=group["status_path"],
         )
 
@@ -758,6 +767,7 @@ def resolve_and_write(group: dict) -> dict:
             "STATUS ERROR",
             error_detail,
             source="error",
+            name=display_name,
             status_path=group["status_path"],
         )
 
@@ -767,13 +777,21 @@ def resolve_and_write(group: dict) -> dict:
         "",
         source="default",
         next_event_at=next_event_at,
+        name=display_name,
         status_path=group["status_path"],
     )
 
 def main():
     groups = build_groups()
     for group in groups:
-        write_status("available", "AVAILABLE", "", source="boot", status_path=group["status_path"])
+        write_status(
+            "available",
+            "AVAILABLE",
+            "",
+            source="boot",
+            name=group.get("display_name", ""),
+            status_path=group["status_path"],
+        )
     while True:
         people = []
         for group in groups:
