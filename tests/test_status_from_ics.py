@@ -35,42 +35,33 @@ def build_all_day_ics(summary: str, start_date: str, end_date: str) -> str:
 class StatusFromIcsTests(unittest.TestCase):
     def setUp(self):
         self.original_timezone = status_from_ics.TIMEZONE_NAME
-        self.original_now = status_from_ics.now_utc
-        self.original_work_hours = status_from_ics.WORK_HOURS
+        self.original_now_local = status_from_ics.now_local
         status_from_ics.TIMEZONE_NAME = "UTC"
 
     def tearDown(self):
         status_from_ics.TIMEZONE_NAME = self.original_timezone
-        status_from_ics.now_utc = self.original_now
-        status_from_ics.WORK_HOURS = self.original_work_hours
+        status_from_ics.now_local = self.original_now_local
 
-    def set_work_hours(self, start=(9, 0), end=(17, 0), days=None):
-        days = days if days is not None else set(range(0, 5))
-        start_minutes = start[0] * 60 + start[1]
-        end_minutes = end[0] * 60 + end[1]
-        status_from_ics.WORK_HOURS = {
-            "start": start,
-            "end": end,
-            "days": days,
-            "start_minutes": start_minutes,
-            "end_minutes": end_minutes,
-            "overnight": end_minutes <= start_minutes,
-        }
+    def set_now(self, when: datetime):
+        status_from_ics.now_local = lambda tz: when.astimezone(tz)
+
+    def build_work_hours(self, start="09:00", end="17:00", days="Mon-Fri"):
+        return status_from_ics.build_work_hours_config(start, end, days)
 
     def test_all_day_non_ooo_is_ignored(self):
-        status_from_ics.now_utc = lambda: datetime(2024, 1, 1, 12, tzinfo=timezone.utc)
+        self.set_now(datetime(2024, 1, 1, 12, tzinfo=timezone.utc))
         ics_text = build_all_day_ics("Company Holiday", "20240101", "20240102")
         self.assertIsNone(status_from_ics.current_calendar_event(ics_text))
 
     def test_all_day_ooo_is_included(self):
-        status_from_ics.now_utc = lambda: datetime(2024, 1, 1, 12, tzinfo=timezone.utc)
+        self.set_now(datetime(2024, 1, 1, 12, tzinfo=timezone.utc))
         ics_text = build_all_day_ics("Out of Office", "20240101", "20240102")
         event = status_from_ics.current_calendar_event(ics_text)
         self.assertIsNotNone(event)
         self.assertEqual(event["name"], "Out of Office")
 
     def test_overlapping_events_pick_earliest_start(self):
-        status_from_ics.now_utc = lambda: datetime(2024, 1, 1, 10, 30, tzinfo=timezone.utc)
+        self.set_now(datetime(2024, 1, 1, 10, 30, tzinfo=timezone.utc))
         ics_text = "\n".join(
             [
                 "BEGIN:VCALENDAR",
@@ -97,7 +88,7 @@ class StatusFromIcsTests(unittest.TestCase):
         self.assertEqual(event["name"], "Standup")
 
     def test_event_end_is_exclusive(self):
-        status_from_ics.now_utc = lambda: datetime(2024, 1, 1, 10, 0, tzinfo=timezone.utc)
+        self.set_now(datetime(2024, 1, 1, 10, 0, tzinfo=timezone.utc))
         ics_text = "\n".join(
             [
                 "BEGIN:VCALENDAR",
@@ -115,25 +106,51 @@ class StatusFromIcsTests(unittest.TestCase):
         self.assertIsNone(status_from_ics.current_calendar_event(ics_text))
 
     def test_working_hours_before_start_is_ooo(self):
-        self.set_work_hours()
-        status_from_ics.now_utc = lambda: datetime(2024, 1, 1, 8, 30, tzinfo=timezone.utc)
-        work_status = status_from_ics.working_hours_status()
+        work_hours = self.build_work_hours()
+        now = datetime(2024, 1, 1, 8, 30, tzinfo=timezone.utc)
+        work_status = status_from_ics.working_hours_status(work_hours, now=now)
         self.assertIsNotNone(work_status)
         self.assertEqual(work_status["state"], "ooo")
         self.assertEqual(work_status["source"], "working_hours")
-        self.assertEqual(work_status["until"], "2024-01-01T09:00:00Z")
+        self.assertEqual(work_status["until"], "2024-01-01T09:00:00+00:00")
 
     def test_working_hours_during_day_is_available(self):
-        self.set_work_hours()
-        status_from_ics.now_utc = lambda: datetime(2024, 1, 1, 10, 0, tzinfo=timezone.utc)
-        self.assertIsNone(status_from_ics.working_hours_status())
+        work_hours = self.build_work_hours()
+        now = datetime(2024, 1, 1, 10, 0, tzinfo=timezone.utc)
+        self.assertIsNone(status_from_ics.working_hours_status(work_hours, now=now))
 
     def test_working_hours_weekend_until_next_start(self):
-        self.set_work_hours()
-        status_from_ics.now_utc = lambda: datetime(2024, 1, 6, 12, 0, tzinfo=timezone.utc)
-        work_status = status_from_ics.working_hours_status()
+        work_hours = self.build_work_hours()
+        now = datetime(2024, 1, 6, 12, 0, tzinfo=timezone.utc)
+        work_status = status_from_ics.working_hours_status(work_hours, now=now)
         self.assertIsNotNone(work_status)
-        self.assertEqual(work_status["until"], "2024-01-08T09:00:00Z")
+        self.assertEqual(work_status["until"], "2024-01-08T09:00:00+00:00")
+
+    def test_overnight_work_hours_span_midnight(self):
+        work_hours = self.build_work_hours(start="22:00", end="06:00", days="Mon-Fri")
+        now = datetime(2024, 1, 2, 1, 0, tzinfo=timezone.utc)
+        self.assertIsNone(status_from_ics.working_hours_status(work_hours, now=now))
+        now = datetime(2024, 1, 2, 12, 0, tzinfo=timezone.utc)
+        self.assertIsNotNone(status_from_ics.working_hours_status(work_hours, now=now))
+
+    def test_next_event_display_excludes_outside_work_hours(self):
+        work_hours = self.build_work_hours()
+        self.set_now(datetime(2024, 1, 1, 7, 30, tzinfo=timezone.utc))
+        ics_text = "\n".join(
+            [
+                "BEGIN:VCALENDAR",
+                "VERSION:2.0",
+                "BEGIN:VEVENT",
+                "UID:event-1",
+                "DTSTAMP:20240101T083000Z",
+                "DTSTART:20240101T083000Z",
+                "DTEND:20240101T090000Z",
+                "SUMMARY:Early Meeting",
+                "END:VEVENT",
+                "END:VCALENDAR",
+            ]
+        )
+        self.assertIsNone(status_from_ics.next_event_for_display(ics_text, work_hours))
 
 
 if __name__ == "__main__":
