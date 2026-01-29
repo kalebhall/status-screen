@@ -55,6 +55,20 @@ Notes:
 - Calendar events still win during scheduled meetings.
 - `WORK_HOURS_DAYS` supports comma-separated days or ranges (e.g., `Mon,Wed,Fri` or `Mon-Fri`).
 
+### Working hours per group
+
+If you configure multiple groups (`ICS_URLS`), you can supply per-group working hours by using
+list-based values. Each entry maps to the matching group index (1st entry → group 1, etc.):
+
+```bash
+WORK_HOURS_STARTS='["08:00", "10:00"]'
+WORK_HOURS_ENDS='["16:00", "19:00"]'
+WORK_HOURS_DAYS_LIST='["Mon-Fri", "Tue-Sat"]'
+```
+
+When a list entry is missing, the global `WORK_HOURS_START`, `WORK_HOURS_END`, and
+`WORK_HOURS_DAYS` values are used as fallbacks.
+
 ## Microsoft busy status
 
 If your Outlook calendar includes Microsoft busy status values (free/busy/out of office), you can
