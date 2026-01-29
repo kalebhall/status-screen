@@ -3,8 +3,25 @@ param(
   [Parameter(Mandatory=$true)][string]$Token,
   [int]$PollSeconds = 10,
   [int]$BusyMinutes = 5,
-  [string]$BusyDetail = "On a call (mic active)"
+  [string]$BusyDetail = "On a call (mic active)",
+  [switch]$HideWindow = $true
 )
+
+function Hide-ConsoleWindow {
+  Add-Type -Namespace StatusScreen -Name WindowUtils -MemberDefinition @"
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+"@
+
+  $hwnd = (Get-Process -Id $PID).MainWindowHandle
+  if ($hwnd -ne [IntPtr]::Zero) {
+    [StatusScreen.WindowUtils]::ShowWindowAsync($hwnd, 0) | Out-Null
+  }
+}
+
+if ($HideWindow) {
+  Hide-ConsoleWindow
+}
 
 function Test-MicInUse {
   $paths = @(
