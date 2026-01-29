@@ -65,7 +65,7 @@ configure_logging()
 
 ICS_URL = os.environ.get("ICS_URL", "")
 TIMEZONE_NAME = os.environ.get("TIMEZONE_NAME", "America/Los_Angeles")
-POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "60"))
+POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "30"))
 ICS_REFRESH_SECONDS = int(
     os.environ.get("ICS_REFRESH_SECONDS", os.environ.get("ICS_REFRESH", "300"))
 )
