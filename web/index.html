@@ -211,151 +211,22 @@
       row.countdown.textContent = `Ends in ${formatCountdown(remaining)}`;
     }
 
-    function parseTimeZoneOffset(timeZone) {
-      if (!timeZone) {
-        return null;
-      }
-      const match = timeZone.match(/^(?:UTC|GMT)\s*([+-])\s*(\d{1,2})(?::?(\d{2}))?$/i);
-      if (!match) {
-        return null;
-      }
-      const sign = match[1] === "-" ? -1 : 1;
-      const hours = Number.parseInt(match[2], 10);
-      const minutes = match[3] ? Number.parseInt(match[3], 10) : 0;
-      if (Number.isNaN(hours) || Number.isNaN(minutes) || hours > 14 || minutes > 59) {
-        return null;
-      }
-      return sign * (hours * 60 + minutes);
-    }
-
-    function formatTimeWithOffset(date, offsetMinutes, options) {
-      const adjusted = new Date(date.getTime() + offsetMinutes * 60 * 1000);
-      return adjusted.toLocaleTimeString("en-US", {
-        ...options,
-        timeZone: "UTC",
-      });
-    }
-
-    function formatDateWithOffset(date, offsetMinutes, options) {
-      const adjusted = new Date(date.getTime() + offsetMinutes * 60 * 1000);
-      return adjusted.toLocaleDateString("en-US", {
-        ...options,
-        timeZone: "UTC",
-      });
-    }
-
-    function getZonedParts(date, timeZone) {
-      if (timeZone) {
-        const offsetMinutes = parseTimeZoneOffset(timeZone);
-        if (offsetMinutes !== null) {
-          const adjusted = new Date(date.getTime() + offsetMinutes * 60 * 1000);
-          return {
-            year: adjusted.getUTCFullYear(),
-            month: adjusted.getUTCMonth(),
-            day: adjusted.getUTCDate(),
-            hour: adjusted.getUTCHours(),
-            minute: adjusted.getUTCMinutes(),
-          };
-        }
-        try {
-          const parts = new Intl.DateTimeFormat("en-US", {
-            timeZone,
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: false,
-          }).formatToParts(date);
-          const lookup = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-          return {
-            year: Number.parseInt(lookup.year, 10),
-            month: Number.parseInt(lookup.month, 10) - 1,
-            day: Number.parseInt(lookup.day, 10),
-            hour: Number.parseInt(lookup.hour, 10),
-            minute: Number.parseInt(lookup.minute, 10),
-          };
-        } catch (error) {
-          // Fall through to local time
-        }
-      }
-      return {
-        year: date.getFullYear(),
-        month: date.getMonth(),
-        day: date.getDate(),
-        hour: date.getHours(),
-        minute: date.getMinutes(),
-      };
-    }
-
-    function isSameDay(first, second, timeZone) {
-      const firstParts = getZonedParts(first, timeZone);
-      const secondParts = getZonedParts(second, timeZone);
-      return (
-        firstParts.year === secondParts.year &&
-        firstParts.month === secondParts.month &&
-        firstParts.day === secondParts.day
-      );
-    }
-
-    function isWithinWorkHours(date, timeZone) {
-      const WORKDAY_START = 9;
-      const WORKDAY_END = 17;
-      const parts = getZonedParts(date, timeZone);
-      return parts.hour >= WORKDAY_START && parts.hour < WORKDAY_END;
-    }
-
-    function formatTime(date, timeZone) {
+    function formatTime(date) {
       const baseOptions = {
         hour: "numeric",
         minute: "2-digit",
         hour12: true,
       };
-      if (timeZone) {
-        const offsetMinutes = parseTimeZoneOffset(timeZone);
-        if (offsetMinutes !== null) {
-          return formatTimeWithOffset(date, offsetMinutes, baseOptions);
-        }
-        try {
-          return date.toLocaleTimeString("en-US", {
-            ...baseOptions,
-            timeZone,
-          });
-        } catch (error) {
-          return date.toLocaleTimeString("en-US", baseOptions);
-        }
-      }
       return date.toLocaleTimeString("en-US", baseOptions);
     }
 
-    function formatDate(date, timeZone) {
+    function formatDate(date) {
       const baseOptions = {
         month: "2-digit",
         day: "2-digit",
         year: "numeric",
       };
-      if (timeZone) {
-        const offsetMinutes = parseTimeZoneOffset(timeZone);
-        if (offsetMinutes !== null) {
-          return formatDateWithOffset(date, offsetMinutes, baseOptions);
-        }
-        try {
-          return date.toLocaleDateString("en-US", {
-            ...baseOptions,
-            timeZone,
-          });
-        } catch (error) {
-          return date.toLocaleDateString("en-US", baseOptions);
-        }
-      }
       return date.toLocaleDateString("en-US", baseOptions);
-    }
-
-    function hasExplicitTimeZone(value) {
-      if (!value || typeof value !== "string") {
-        return false;
-      }
-      return /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(value.trim());
     }
 
     function updateNextEvent(index) {
@@ -367,7 +238,6 @@
         }
         return;
       }
-      const displayTimeZone = hasExplicitTimeZone(state.nextEventAt) ? state.timeZone : null;
       const nextTime = new Date(state.nextEventAt);
       if (Number.isNaN(nextTime.getTime())) {
         row.nextEvent.textContent = "";
@@ -378,22 +248,13 @@
         row.nextEvent.textContent = "";
         return;
       }
-      if (!isSameDay(nextTime, now, displayTimeZone)) {
-        row.nextEvent.textContent = "";
-        return;
-      }
-      if (!isWithinWorkHours(nextTime, displayTimeZone)) {
-        row.nextEvent.textContent = "";
-        return;
-      }
-      const formattedTime = formatTime(nextTime, displayTimeZone);
+      const formattedTime = formatTime(nextTime);
       row.nextEvent.textContent = `Next event at ${formattedTime}`;
     }
 
     function updateClock() {
       const now = new Date();
-      const zone = rowState[0] ? rowState[0].timeZone : null;
-      footer.textContent = `${formatDate(now, zone)} ${formatTime(now, zone)}`;
+      footer.textContent = `${formatDate(now)} ${formatTime(now)}`;
     }
 
     function updateRow(index, person) {
@@ -411,7 +272,6 @@
         until: person.until || null,
         state,
         nextEventAt: person.next_event_at || null,
-        timeZone: person.time_zone || null,
       };
       updateCountdown(index);
       updateNextEvent(index);

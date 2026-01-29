@@ -608,15 +608,37 @@ def next_calendar_event(ics_text: str) -> dict | None:
     upcoming.sort(key=lambda x: x[0])
     return {"name": upcoming[0][2], "start": upcoming[0][0]}
 
+def same_local_day(first: datetime, second: datetime) -> bool:
+    return first.date() == second.date()
+
+def next_event_for_display(
+    ics_text: str,
+    work_hours: dict | None,
+) -> str | None:
+    local_tz = get_local_tz()
+    if local_tz is None:
+        return None
+    now = now_local(local_tz)
+    next_ev = next_calendar_event(ics_text)
+    if not next_ev:
+        return None
+    start_local = next_ev["start"]
+    if start_local.tzinfo is None:
+        start_local = start_local.replace(tzinfo=local_tz)
+    start_local = start_local.astimezone(local_tz)
+    if not same_local_day(start_local, now):
+        return None
+    if work_hours and not is_within_work_hours(start_local, work_hours):
+        return None
+    return start_local.isoformat()
+
 def resolve_and_write(group: dict) -> dict:
     next_event_at = None
     error_detail = None
     try:
         ics_text = fetch_ics_text(group["ics_url"], group["cache_path"])
         ev = current_calendar_event(ics_text)
-        next_ev = next_calendar_event(ics_text)
-        if next_ev:
-            next_event_at = next_ev["start"].isoformat()
+        next_event_at = next_event_for_display(ics_text, group.get("work_hours"))
         if ev:
             name = ev["name"]
             detail = name if SHOW_EVENT_DETAILS else ""
