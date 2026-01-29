@@ -8,6 +8,7 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 RUNTIME_DIR = os.environ.get("STATUS_SCREEN_DIR", "/home/pi/status-screen")
 
 STATUS_JSON_PATH = os.path.join(RUNTIME_DIR, "status.json")
+STATUS_MULTI_JSON_PATH = os.path.join(RUNTIME_DIR, "status-multi.json")
 OVERRIDE_JSON_PATH = os.path.join(RUNTIME_DIR, "override.json")
 
 logging.basicConfig(
@@ -86,6 +87,70 @@ IGNORE_KEYWORDS = ["cancelled", "canceled"]
 ALLDAY_ONLY_COUNTS_IF_OOO = parse_env_bool("ALLDAY_ONLY_COUNTS_IF_OOO", True)
 USE_MS_BUSY_STATUS = parse_env_bool("USE_MS_BUSY_STATUS", False)
 SHOW_EVENT_DETAILS = parse_env_bool("SHOW_EVENT_DETAILS", True)
+
+def parse_env_list(key: str) -> list[str]:
+    raw = os.environ.get(key, "").strip()
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(item).strip() for item in parsed if str(item).strip()]
+    except json.JSONDecodeError:
+        pass
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+def build_groups() -> list[dict]:
+    ics_urls = parse_env_list("ICS_URLS")
+    if not ics_urls and ICS_URL:
+        ics_urls = [ICS_URL]
+    display_names = parse_env_list("DISPLAY_NAMES")
+    if not display_names:
+        single_name = os.environ.get("DISPLAY_NAME", "").strip()
+        if single_name:
+            display_names = [single_name]
+    auth_tokens = parse_env_list("AUTH_TOKENS")
+    if not auth_tokens:
+        single_token = os.environ.get("AUTH_TOKEN", "").strip()
+        if single_token:
+            auth_tokens = [single_token]
+
+    group_count = len(ics_urls) if ics_urls else 1
+    if len(display_names) > group_count or len(auth_tokens) > group_count:
+        logging.warning(
+            "Extra DISPLAY_NAMES/AUTH_TOKENS provided; only the first %s entries will be used.",
+            group_count,
+        )
+
+    base_cache = ICS_CACHE_PATH
+    cache_root, cache_ext = os.path.splitext(base_cache)
+    groups = []
+    for index in range(group_count):
+        if group_count == 1:
+            cache_path = base_cache
+            status_path = STATUS_JSON_PATH
+            override_path = OVERRIDE_JSON_PATH
+        else:
+            suffix = f"-{index + 1}"
+            cache_path = f"{cache_root}{suffix}{cache_ext}" if cache_ext else f"{base_cache}{suffix}"
+            status_path = (
+                STATUS_JSON_PATH
+                if index == 0
+                else os.path.join(RUNTIME_DIR, f"status-{index + 1}.json")
+            )
+            override_path = os.path.join(RUNTIME_DIR, f"override-{index + 1}.json")
+        groups.append(
+            {
+                "index": index,
+                "ics_url": ics_urls[index] if index < len(ics_urls) else "",
+                "display_name": display_names[index] if index < len(display_names) else f"Group {index + 1}",
+                "auth_token": auth_tokens[index] if index < len(auth_tokens) else "",
+                "cache_path": cache_path,
+                "status_path": status_path,
+                "override_path": override_path,
+            }
+        )
+    return groups
 
 DAY_NAME_TO_INDEX = {
     "mon": 0,
@@ -276,6 +341,7 @@ def write_status(
     source: str = "",
     until: str | None = None,
     next_event_at: str | None = None,
+    status_path: str = STATUS_JSON_PATH,
 ):
     payload = {
         "state": state,
@@ -290,11 +356,12 @@ def write_status(
     if next_event_at:
         payload["next_event_at"] = next_event_at
     logging.debug("Writing status: %s", payload)
-    os.makedirs(os.path.dirname(STATUS_JSON_PATH), exist_ok=True)
-    tmp = STATUS_JSON_PATH + ".tmp"
+    os.makedirs(os.path.dirname(status_path), exist_ok=True)
+    tmp = status_path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(payload, f)
-    os.replace(tmp, STATUS_JSON_PATH)
+    os.replace(tmp, status_path)
+    return payload
 
 def is_ooo(text: str) -> bool:
     t = (text or "").lower()
@@ -304,11 +371,11 @@ def should_ignore(text: str) -> bool:
     t = (text or "").lower()
     return any(k in t for k in IGNORE_KEYWORDS)
 
-def load_override() -> dict | None:
-    if not os.path.exists(OVERRIDE_JSON_PATH):
+def load_override(override_path: str) -> dict | None:
+    if not os.path.exists(override_path):
         return None
     try:
-        with open(OVERRIDE_JSON_PATH, "r") as f:
+        with open(override_path, "r") as f:
             o = json.load(f)
         local_tz = get_local_tz()
         if local_tz is None:
@@ -320,22 +387,22 @@ def load_override() -> dict | None:
             return None
         return o
     except Exception:
-        logging.exception("Failed to load override from %s", OVERRIDE_JSON_PATH)
+        logging.exception("Failed to load override from %s", override_path)
         return None
 
-def fetch_ics_text() -> str:
+def fetch_ics_text(ics_url: str, cache_path: str) -> str:
     import requests
     from urllib.parse import parse_qs, urlparse, urlunparse
 
     cached_text = None
     cache_age = None
-    if os.path.exists(ICS_CACHE_PATH):
+    if os.path.exists(cache_path):
         try:
-            with open(ICS_CACHE_PATH, "r") as f:
+            with open(cache_path, "r") as f:
                 cached_text = f.read()
-            cache_age = time.time() - os.path.getmtime(ICS_CACHE_PATH)
+            cache_age = time.time() - os.path.getmtime(cache_path)
         except Exception:
-            logging.exception("Failed to read ICS cache %s", ICS_CACHE_PATH)
+            logging.exception("Failed to read ICS cache %s", cache_path)
             cached_text = None
             cache_age = None
 
@@ -345,12 +412,12 @@ def fetch_ics_text() -> str:
         logging.debug("Using cached ICS file (%s seconds old).", int(cache_age))
         return cached_text
 
-    if not ICS_URL:
+    if not ics_url:
         if cached_text:
             logging.warning("ICS_URL is not set; using cached ICS")
             return cached_text
         raise RuntimeError("ICS_URL is not set")
-    fetch_url = ICS_URL
+    fetch_url = ics_url
     parsed = urlparse(fetch_url)
     if parsed.scheme in {"webcal", "webcals"}:
         fetch_url = urlunparse(parsed._replace(scheme="https"))
@@ -385,11 +452,11 @@ def fetch_ics_text() -> str:
         text = r.text
         if "BEGIN:VCALENDAR" not in text[:2000]:
             raise RuntimeError("ICS fetch did not return VCALENDAR")
-        os.makedirs(os.path.dirname(ICS_CACHE_PATH), exist_ok=True)
-        tmp = ICS_CACHE_PATH + ".tmp"
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        tmp = cache_path + ".tmp"
         with open(tmp, "w") as f:
             f.write(text)
-        os.replace(tmp, ICS_CACHE_PATH)
+        os.replace(tmp, cache_path)
         return text
     except Exception:
         logging.exception("Failed to fetch ICS from %s", fetch_url)
@@ -529,11 +596,11 @@ def next_calendar_event(ics_text: str) -> dict | None:
     upcoming.sort(key=lambda x: x[0])
     return {"name": upcoming[0][2], "start": upcoming[0][0]}
 
-def resolve_and_write():
+def resolve_and_write(group: dict) -> dict:
     next_event_at = None
     error_detail = None
     try:
-        ics_text = fetch_ics_text()
+        ics_text = fetch_ics_text(group["ics_url"], group["cache_path"])
         ev = current_calendar_event(ics_text)
         next_ev = next_calendar_event(ics_text)
         if next_ev:
@@ -544,71 +611,96 @@ def resolve_and_write():
             until = ev["end"].isoformat()
             busy_status = ev.get("busy_status")
             if USE_MS_BUSY_STATUS and busy_status == "ooo":
-                write_status(
+                return write_status(
                     "ooo",
                     "OUT OF OFFICE",
                     detail,
                     source="calendar",
                     until=until,
                     next_event_at=next_event_at,
+                    status_path=group["status_path"],
                 )
             elif is_ooo(name):
-                write_status(
+                return write_status(
                     "ooo",
                     "OUT OF OFFICE",
                     detail,
                     source="calendar",
                     until=until,
                     next_event_at=next_event_at,
+                    status_path=group["status_path"],
                 )
             else:
-                write_status(
+                return write_status(
                     "meeting",
                     "IN A MEETING",
                     detail,
                     source="calendar",
                     until=until,
                     next_event_at=next_event_at,
+                    status_path=group["status_path"],
                 )
-            return
     except Exception as ex:
         logging.exception("Failed to resolve calendar status")
         error_detail = f"{type(ex).__name__}: {str(ex)}"[:100]
 
-    override = load_override()
+    override = load_override(group["override_path"])
     if override:
-        write_status(
+        return write_status(
             override.get("state", "busy"),
             override.get("label", "BUSY"),
             override.get("detail", ""),
             source="override",
             until=override.get("until"),
             next_event_at=next_event_at,
+            status_path=group["status_path"],
         )
-        return
 
     work_status = working_hours_status()
     if work_status:
-        write_status(
+        return write_status(
             work_status["state"],
             work_status["label"],
             work_status["detail"],
             source=work_status["source"],
             until=work_status.get("until"),
             next_event_at=next_event_at,
+            status_path=group["status_path"],
         )
-        return
 
     if error_detail:
-        write_status("error", "STATUS ERROR", error_detail, source="error")
-        return
+        return write_status(
+            "error",
+            "STATUS ERROR",
+            error_detail,
+            source="error",
+            status_path=group["status_path"],
+        )
 
-    write_status("available", "AVAILABLE", "", source="default", next_event_at=next_event_at)
+    return write_status(
+        "available",
+        "AVAILABLE",
+        "",
+        source="default",
+        next_event_at=next_event_at,
+        status_path=group["status_path"],
+    )
 
 def main():
-    write_status("available", "AVAILABLE", "", source="boot")
+    groups = build_groups()
+    for group in groups:
+        write_status("available", "AVAILABLE", "", source="boot", status_path=group["status_path"])
     while True:
-        resolve_and_write()
+        people = []
+        for group in groups:
+            payload = resolve_and_write(group)
+            payload["name"] = group["display_name"]
+            people.append(payload)
+        os.makedirs(os.path.dirname(STATUS_MULTI_JSON_PATH), exist_ok=True)
+        tmp = STATUS_MULTI_JSON_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({"generated": datetime.utcnow().isoformat(timespec="seconds") + "Z", "people": people}, f)
+        os.replace(tmp, STATUS_MULTI_JSON_PATH)
         time.sleep(POLL_SECONDS)
 
 if __name__ == "__main__":

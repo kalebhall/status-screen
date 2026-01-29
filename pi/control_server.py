@@ -20,17 +20,45 @@ def load_dotenv(dotenv_path: str):
             os.environ.setdefault(k, v)
 
 load_dotenv(os.path.join(RUNTIME_DIR, ".env"))
-AUTH_TOKEN = os.environ.get("AUTH_TOKEN", "")
+
+def parse_env_list(key: str) -> list[str]:
+    raw = os.environ.get(key, "").strip()
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(item).strip() for item in parsed if str(item).strip()]
+    except json.JSONDecodeError:
+        pass
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+AUTH_TOKENS = parse_env_list("AUTH_TOKENS")
+if not AUTH_TOKENS:
+    single_token = os.environ.get("AUTH_TOKEN", "").strip()
+    if single_token:
+        AUTH_TOKENS = [single_token]
 
 app = Flask(__name__)
 
 def now_utc():
     return datetime.now(timezone.utc)
 
-def auth_ok(req) -> bool:
-    return AUTH_TOKEN and req.headers.get("X-Auth-Token", "") == AUTH_TOKEN
+def resolve_token_index(req) -> int | None:
+    token = req.headers.get("X-Auth-Token", "")
+    if not token:
+        return None
+    try:
+        return AUTH_TOKENS.index(token)
+    except ValueError:
+        return None
 
-def write_override(state: str, label: str, detail: str, minutes: int):
+def override_path_for(index: int) -> str:
+    if len(AUTH_TOKENS) <= 1:
+        return OVERRIDE_JSON_PATH
+    return os.path.join(RUNTIME_DIR, f"override-{index + 1}.json")
+
+def write_override(state: str, label: str, detail: str, minutes: int, override_path: str):
     until = now_utc() + timedelta(minutes=minutes)
     payload = {
         "state": state,
@@ -38,16 +66,16 @@ def write_override(state: str, label: str, detail: str, minutes: int):
         "detail": detail,
         "until": until.isoformat().replace("+00:00", "Z"),
     }
-    os.makedirs(os.path.dirname(OVERRIDE_JSON_PATH), exist_ok=True)
-    tmp = OVERRIDE_JSON_PATH + ".tmp"
+    os.makedirs(os.path.dirname(override_path), exist_ok=True)
+    tmp = override_path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(payload, f)
-    os.replace(tmp, OVERRIDE_JSON_PATH)
+    os.replace(tmp, override_path)
     return payload
 
-def clear_override():
+def clear_override(override_path: str):
     try:
-        os.remove(OVERRIDE_JSON_PATH)
+        os.remove(override_path)
     except FileNotFoundError:
         pass
 
@@ -123,7 +151,8 @@ async function clearOverride() {
 
 @app.post("/api/override")
 def api_override():
-    if not auth_ok(request):
+    token_index = resolve_token_index(request)
+    if token_index is None:
         return jsonify({"error": "unauthorized"}), 401
     data = request.get_json(force=True, silent=True) or {}
     state = data.get("state", "busy")
@@ -135,13 +164,16 @@ def api_override():
     except (TypeError, ValueError):
         minutes_value = 30
     minutes = max(1, min(minutes_value, 24 * 60))
-    return jsonify(write_override(state, label, detail, minutes))
+    override_path = override_path_for(token_index)
+    return jsonify(write_override(state, label, detail, minutes, override_path))
 
 @app.post("/api/clear")
 def api_clear():
-    if not auth_ok(request):
+    token_index = resolve_token_index(request)
+    if token_index is None:
         return jsonify({"error": "unauthorized"}), 401
-    clear_override()
+    override_path = override_path_for(token_index)
+    clear_override(override_path)
     return jsonify({"ok": True})
 
 @app.get("/api/health")
