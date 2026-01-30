@@ -202,6 +202,8 @@ def get_local_tz():
     local_tz = resolve_tzinfo(TIMEZONE_NAME)
     if local_tz is None:
         logging.error("Invalid TIMEZONE_NAME=%s", TIMEZONE_NAME)
+    else:
+        logging.debug("Resolved TIMEZONE_NAME=%s to tzinfo=%s", TIMEZONE_NAME, local_tz)
     return local_tz
 
 WINDOWS_TZ_MAP = {
@@ -594,11 +596,31 @@ def event_times_to_local(event, local_tz) -> tuple[datetime, datetime]:
     end = event.end.datetime
     if start is None or end is None:
         raise ValueError("Event start/end missing")
+    if logging.getLogger().isEnabledFor(logging.DEBUG):
+        logging.debug(
+            "Event %s raw start=%s tz=%s end=%s tz=%s",
+            getattr(event, "name", None),
+            start,
+            getattr(start, "tzinfo", None),
+            end,
+            getattr(end, "tzinfo", None),
+        )
     start = apply_event_tzid(start, event, "DTSTART")
     end = apply_event_tzid(end, event, "DTEND")
     start = coerce_event_timezone(start, local_tz)
     end = coerce_event_timezone(end, local_tz)
-    return start.astimezone(local_tz), end.astimezone(local_tz)
+    start_local = start.astimezone(local_tz)
+    end_local = end.astimezone(local_tz)
+    if logging.getLogger().isEnabledFor(logging.DEBUG):
+        logging.debug(
+            "Event %s local start=%s tz=%s end=%s tz=%s",
+            getattr(event, "name", None),
+            start_local,
+            getattr(start_local, "tzinfo", None),
+            end_local,
+            getattr(end_local, "tzinfo", None),
+        )
+    return start_local, end_local
 
 def extract_event_extra_values(event):
     for container in (getattr(event, "extra", None), getattr(event, "_unused", None)):
