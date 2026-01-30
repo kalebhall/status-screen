@@ -558,6 +558,20 @@ def iter_event_extra_items(event):
 def extract_event_tzid(event, prop_name: str) -> str | None:
     target = prop_name.upper()
     for item in iter_event_extra_items(event):
+        if isinstance(item, str):
+            raw = item.strip()
+            if not raw:
+                continue
+            header = raw.split(":", 1)[0]
+            header_key = header.split(";", 1)[0].strip().upper()
+            if header_key != target:
+                continue
+            for segment in header.split(";")[1:]:
+                if segment.upper().startswith("TZID="):
+                    tzid = segment.split("=", 1)[1].strip()
+                    if tzid:
+                        return tzid
+            continue
         name = None
         value_obj = item
         if isinstance(item, tuple) and len(item) >= 2:
@@ -576,14 +590,27 @@ def extract_event_tzid(event, prop_name: str) -> str | None:
                     tzid = segment.split("=", 1)[1].strip()
                     if tzid:
                         return tzid
-        params = getattr(value_obj, "params", None) or getattr(value_obj, "_params", None)
-        if not params:
-            continue
-        tzid = params.get("TZID") or params.get("tzid")
-        if isinstance(tzid, (list, tuple)):
-            tzid = tzid[0] if tzid else None
-        if tzid:
-            return str(tzid)
+        value_candidates = []
+        if isinstance(value_obj, (list, tuple)):
+            value_candidates.extend(value_obj)
+        else:
+            value_candidates.append(value_obj)
+        for candidate in value_candidates:
+            params = getattr(candidate, "params", None) or getattr(candidate, "_params", None)
+            if not params:
+                continue
+            tzid = params.get("TZID") or params.get("tzid")
+            if isinstance(tzid, (list, tuple)):
+                tzid = tzid[0] if tzid else None
+            if tzid:
+                return str(tzid)
+    begin = getattr(event, "begin", None)
+    if begin is not None:
+        tzinfo = getattr(begin, "tzinfo", None)
+        if tzinfo is not None:
+            name = getattr(tzinfo, "zone", None) or getattr(tzinfo, "key", None)
+            if name:
+                return str(name)
     return None
 
 def apply_event_tzid(dt: datetime, event, prop_name: str) -> datetime:
