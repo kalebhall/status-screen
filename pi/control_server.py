@@ -34,6 +34,9 @@ def parse_env_list(key: str) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 AUTH_TOKENS = parse_env_list("AUTH_TOKENS")
+ICS_URLS = parse_env_list("ICS_URLS")
+DISPLAY_NAMES = parse_env_list("DISPLAY_NAMES")
+GROUP_COUNT = len(ICS_URLS) if ICS_URLS else 1
 
 app = Flask(__name__)
 
@@ -49,10 +52,32 @@ def resolve_token_index(req) -> int | None:
     except ValueError:
         return None
 
+def group_display_names() -> list[str]:
+    return [
+        DISPLAY_NAMES[index] if index < len(DISPLAY_NAMES) else f"Group {index + 1}"
+        for index in range(GROUP_COUNT)
+    ]
+
 def override_path_for(index: int) -> str:
-    if len(AUTH_TOKENS) <= 1:
+    if GROUP_COUNT <= 1:
         return OVERRIDE_JSON_PATH
     return os.path.join(RUNTIME_DIR, f"override-{index + 1}.json")
+
+def resolve_group_index(token_index: int, data: dict) -> int:
+    if GROUP_COUNT <= 1:
+        return 0
+    if len(AUTH_TOKENS) > 1:
+        return min(token_index, GROUP_COUNT - 1)
+    requested = data.get("group_index", data.get("group"))
+    if requested is None:
+        return 0
+    try:
+        requested_index = int(requested)
+    except (TypeError, ValueError):
+        return 0
+    if 0 <= requested_index < GROUP_COUNT:
+        return requested_index
+    return 0
 
 def write_override(state: str, label: str, detail: str, minutes: int, override_path: str):
     until = now_utc() + timedelta(minutes=minutes)
@@ -77,6 +102,18 @@ def clear_override(override_path: str):
 
 @app.get("/control")
 def control_page():
+    group_options = "".join(
+        f'<option value="{index}">{name}</option>'
+        for index, name in enumerate(group_display_names())
+    )
+    group_selector = ""
+    if GROUP_COUNT > 1:
+        group_selector = f"""
+  <div class="row">
+    <label>Person: </label>
+    <select id="group">{group_options}</select>
+  </div>
+"""
     html = """
 <!doctype html>
 <html>
@@ -101,6 +138,7 @@ def control_page():
     <input id="token" size="50" placeholder="Paste AUTH_TOKENS entry here">
   </div>
 
+__GROUP_SELECTOR__
   <div class="row">
     <label>Detail: </label>
     <input id="detail" size="40" placeholder="e.g., Unscheduled call">
@@ -124,11 +162,13 @@ async function setOverride(state,label) {
   const token = document.getElementById('token').value;
   const detail = document.getElementById('detail').value;
   const minutes = parseInt(document.getElementById('minutes').value || '30', 10);
+  const groupEl = document.getElementById('group');
+  const group_index = groupEl ? parseInt(groupEl.value, 10) : 0;
 
   const r = await fetch('/api/override', {
     method: 'POST',
     headers: { 'Content-Type':'application/json', 'X-Auth-Token': token },
-    body: JSON.stringify({ state, label, detail, minutes })
+    body: JSON.stringify({ state, label, detail, minutes, group_index })
   });
 
   document.getElementById('out').textContent = await r.text();
@@ -136,13 +176,20 @@ async function setOverride(state,label) {
 
 async function clearOverride() {
   const token = document.getElementById('token').value;
-  const r = await fetch('/api/clear', { method: 'POST', headers: { 'X-Auth-Token': token }});
+  const groupEl = document.getElementById('group');
+  const group_index = groupEl ? parseInt(groupEl.value, 10) : 0;
+  const r = await fetch('/api/clear', {
+    method: 'POST',
+    headers: { 'Content-Type':'application/json', 'X-Auth-Token': token },
+    body: JSON.stringify({ group_index })
+  });
   document.getElementById('out').textContent = await r.text();
 }
 </script>
 </body>
 </html>
 """
+    html = html.replace("__GROUP_SELECTOR__", group_selector)
     return Response(html, mimetype="text/html")
 
 @app.post("/api/override")
@@ -160,7 +207,8 @@ def api_override():
     except (TypeError, ValueError):
         minutes_value = 30
     minutes = max(1, min(minutes_value, 24 * 60))
-    override_path = override_path_for(token_index)
+    group_index = resolve_group_index(token_index, data)
+    override_path = override_path_for(group_index)
     return jsonify(write_override(state, label, detail, minutes, override_path))
 
 @app.post("/api/clear")
@@ -168,7 +216,9 @@ def api_clear():
     token_index = resolve_token_index(request)
     if token_index is None:
         return jsonify({"error": "unauthorized"}), 401
-    override_path = override_path_for(token_index)
+    data = request.get_json(force=True, silent=True) or {}
+    group_index = resolve_group_index(token_index, data)
+    override_path = override_path_for(group_index)
     clear_override(override_path)
     return jsonify({"ok": True})
 
