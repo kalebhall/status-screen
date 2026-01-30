@@ -549,8 +549,8 @@ def iter_event_extra_items(event):
         if not container:
             continue
         if isinstance(container, dict):
-            for value in container.values():
-                yield value
+            for key, value in container.items():
+                yield key, value
             continue
         for item in container:
             yield item
@@ -566,8 +566,16 @@ def extract_event_tzid(event, prop_name: str) -> str | None:
         name = name or getattr(value_obj, "name", None) or getattr(value_obj, "_name", None)
         if not name:
             continue
-        if str(name).strip().upper() != target:
+        name_text = str(name).strip()
+        name_key = name_text.split(";", 1)[0].upper()
+        if name_key != target:
             continue
+        if ";" in name_text:
+            for segment in name_text.split(";")[1:]:
+                if segment.upper().startswith("TZID="):
+                    tzid = segment.split("=", 1)[1].strip()
+                    if tzid:
+                        return tzid
         params = getattr(value_obj, "params", None) or getattr(value_obj, "_params", None)
         if not params:
             continue
