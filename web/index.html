@@ -305,35 +305,10 @@
       return await response.json();
     }
 
-    async function fetchSequentialStatuses() {
-      const people = [];
-      for (let index = 1; ; index += 1) {
-        const path = index === 1 ? "/status.json" : `/status-${index}.json`;
-        const payload = await fetchStatusPath(path);
-        if (!payload) {
-          break;
-        }
-        people.push(payload);
-      }
-      return people;
-    }
-
     async function fetchStatusPayload() {
       try {
-        const multi = await fetchStatusPath("/status-multi.json");
-        if (multi && Array.isArray(multi.people) && multi.people.length > 0) {
-          return multi;
-        }
-        const people = await fetchSequentialStatuses();
-        if (people.length > 0) {
-          return { people };
-        }
-        return multi;
+        return await fetchStatusPath("/status.json");
       } catch (error) {
-        const people = await fetchSequentialStatuses();
-        if (people.length > 0) {
-          return { people };
-        }
         return null;
       }
     }
