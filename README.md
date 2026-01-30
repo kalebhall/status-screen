@@ -127,14 +127,14 @@ Restart the service after updating `.env`: `sudo systemctl restart status-from-i
 If the display shows `HTTPSConnectionPool(... Max retries exceeded ...)`, the Pi cannot reach the
 ICS URL or is receiving a non-calendar response. Ensure:
 
-- The `ICS_URL` points to a published calendar feed (Settings → Calendar → Shared calendars → Publish a calendar).
+- The first `ICS_URLS` entry points to a published calendar feed (Settings → Calendar → Shared calendars → Publish a calendar).
 - The calendar is published with **Can view all details** and an ICS URL copied from the publish dialog.
-- The Pi can reach the URL over HTTPS (test from the Pi with `curl -I "<ICS_URL>"`; you should see a 200 and `BEGIN:VCALENDAR` in the body).
+- The Pi can reach the URL over HTTPS (test from the Pi with `curl -I "<ICS_URLS_ENTRY>"`; you should see a 200 and `BEGIN:VCALENDAR` in the body).
 - The service also accepts `webcal://` URLs and Outlook subscription links (it will normalize them to the underlying HTTPS ICS feed).
 
-If `curl -L "<ICS_URL>" -o /tmp/cal.ics` works on the Pi but the display still shows the error:
+If `curl -L "<ICS_URLS_ENTRY>" -o /tmp/cal.ics` works on the Pi but the display still shows the error:
 
-- Confirm the runtime `.env` file at `/home/pi/status-screen/.env` contains the same `ICS_URL`.
+- Confirm the runtime `.env` file at `/home/pi/status-screen/.env` contains the same `ICS_URLS` entry.
 - Restart the service after changes: `sudo systemctl restart status-from-ics.service`.
 - Check logs for the live error message: `sudo journalctl -u status-from-ics.service -n 200 --no-pager`.
 
@@ -149,23 +149,23 @@ sudo systemctl restart status-from-ics.service status-control.service
 
 ## Windows mic agent
 
-The optional Windows mic agent watches for active microphone usage and posts a BUSY override to the Pi whenever the mic is in use. It uses the `AUTH_TOKEN` value from the `.env` file. Run it from PowerShell:
+The optional Windows mic agent watches for active microphone usage and posts a BUSY override to the Pi whenever the mic is in use. It uses the matching `AUTH_TOKENS` entry from the `.env` file (the same index as the calendar you want to control). Run it from PowerShell:
 
 ```powershell
-.\windows\status_agent.ps1 -PiBaseUrl "http://<pi-ip>" -Token "<AUTH_TOKEN>"
+.\windows\status_agent.ps1 -PiBaseUrl "http://<pi-ip>" -Token "<AUTH_TOKENS_ENTRY>"
 ```
 
 Optional parameters let you tune polling and the busy label:
 
 ```powershell
-.\windows\status_agent.ps1 -PiBaseUrl "http://<pi-ip>" -Token "<AUTH_TOKEN>" -PollSeconds 10 -BusyMinutes 5 -BusyDetail "On a call (mic active)"
+.\windows\status_agent.ps1 -PiBaseUrl "http://<pi-ip>" -Token "<AUTH_TOKENS_ENTRY>" -PollSeconds 10 -BusyMinutes 5 -BusyDetail "On a call (mic active)"
 ```
 
 To run it in the background with Task Scheduler (no taskbar window), use the VBScript
 launcher and point your task at `wscript.exe`:
 
 ```
-wscript.exe "C:\path\to\status_agent_hidden.vbs" -ExecutionPolicy Bypass -NonInteractive -WindowStyle Hidden -File "C:\path\to\status_agent.ps1" -PiBaseUrl "http://<pi-ip>" -Token "<AUTH_TOKEN>"
+wscript.exe "C:\path\to\status_agent_hidden.vbs" -ExecutionPolicy Bypass -NonInteractive -WindowStyle Hidden -File "C:\path\to\status_agent.ps1" -PiBaseUrl "http://<pi-ip>" -Token "<AUTH_TOKENS_ENTRY>"
 ```
 
 Calendar BUSY/IN A MEETING states take priority over the mic-active override.
@@ -180,9 +180,9 @@ chromium-browser --kiosk --app="http://<pi-ip>/" --start-fullscreen
 
 ## Multi-person display (single UI)
 
-The status service can now render one or many groups from a single UI. Configure multiple
+The status service can now render one or many groups from a single UI. Configure
 calendar feeds by providing arrays in `.env`, and the main UI will automatically show each
-group (or just one if only a single entry is supplied).
+group (use a single entry array for a one-person setup).
 
 Example `.env` configuration:
 
@@ -192,5 +192,5 @@ AUTH_TOKENS='["token-1","token-2"]'
 DISPLAY_NAMES='["Team A","Team B"]'
 ```
 
-If you only need one group, keep using `ICS_URL`/`AUTH_TOKEN` and optionally set
-`DISPLAY_NAME="My Team"`. The UI will display just that single group.
+If you only need one group, keep just one entry in each array (and optionally supply a
+single `DISPLAY_NAMES` entry). The UI will display just that single group.

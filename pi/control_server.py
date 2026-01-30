@@ -34,10 +34,6 @@ def parse_env_list(key: str) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 AUTH_TOKENS = parse_env_list("AUTH_TOKENS")
-if not AUTH_TOKENS:
-    single_token = os.environ.get("AUTH_TOKEN", "").strip()
-    if single_token:
-        AUTH_TOKENS = [single_token]
 
 app = Flask(__name__)
 
@@ -102,7 +98,7 @@ def control_page():
 
   <div class="row">
     <label>Token: </label>
-    <input id="token" size="50" placeholder="Paste AUTH_TOKEN here">
+    <input id="token" size="50" placeholder="Paste AUTH_TOKENS entry here">
   </div>
 
   <div class="row">
