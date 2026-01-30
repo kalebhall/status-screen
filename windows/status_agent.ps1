@@ -7,16 +7,51 @@ param(
   [switch]$HideWindow = $true
 )
 
+if ($HideWindow -and -not $env:STATUS_AGENT_BACKGROUND) {
+  $env:STATUS_AGENT_BACKGROUND = "1"
+  $powershellw = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershellw.exe"
+  $argList = @(
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    $PSCommandPath
+  )
+
+  foreach ($key in $PSBoundParameters.Keys) {
+    if ($key -eq "HideWindow") {
+      continue
+    }
+    $value = $PSBoundParameters[$key]
+    if ($value -is [System.Management.Automation.SwitchParameter]) {
+      if ($value.IsPresent) {
+        $argList += "-$key"
+      }
+    } else {
+      $argList += "-$key"
+      $argList += "$value"
+    }
+  }
+
+  Start-Process -FilePath $powershellw -ArgumentList $argList -WindowStyle Hidden | Out-Null
+  exit
+}
+
 function Hide-ConsoleWindow {
   Add-Type -Namespace StatusScreen -Name WindowUtils -MemberDefinition @"
     [DllImport("user32.dll")]
     public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("kernel32.dll")]
+    public static extern bool FreeConsole();
 "@
 
   $hwnd = (Get-Process -Id $PID).MainWindowHandle
   if ($hwnd -ne [IntPtr]::Zero) {
     [StatusScreen.WindowUtils]::ShowWindowAsync($hwnd, 0) | Out-Null
   }
+  [StatusScreen.WindowUtils]::FreeConsole() | Out-Null
 }
 
 if ($HideWindow) {
@@ -65,7 +100,9 @@ function Clear-Override {
   } catch { }
 }
 
-Write-Host "Mic agent -> $PiBaseUrl  Poll=${PollSeconds}s Busy=${BusyMinutes}m"
+if (-not $HideWindow) {
+  Write-Host "Mic agent -> $PiBaseUrl  Poll=${PollSeconds}s Busy=${BusyMinutes}m"
+}
 
 $micWasInUse = $false
 while ($true) {
