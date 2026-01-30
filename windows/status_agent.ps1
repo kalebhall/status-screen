@@ -11,12 +11,16 @@ function Hide-ConsoleWindow {
   Add-Type -Namespace StatusScreen -Name WindowUtils -MemberDefinition @"
     [DllImport("user32.dll")]
     public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("kernel32.dll")]
+    public static extern bool FreeConsole();
 "@
 
   $hwnd = (Get-Process -Id $PID).MainWindowHandle
   if ($hwnd -ne [IntPtr]::Zero) {
     [StatusScreen.WindowUtils]::ShowWindowAsync($hwnd, 0) | Out-Null
   }
+  [StatusScreen.WindowUtils]::FreeConsole() | Out-Null
 }
 
 if ($HideWindow) {
@@ -65,7 +69,9 @@ function Clear-Override {
   } catch { }
 }
 
-Write-Host "Mic agent -> $PiBaseUrl  Poll=${PollSeconds}s Busy=${BusyMinutes}m"
+if (-not $HideWindow) {
+  Write-Host "Mic agent -> $PiBaseUrl  Poll=${PollSeconds}s Busy=${BusyMinutes}m"
+}
 
 $micWasInUse = $false
 while ($true) {
