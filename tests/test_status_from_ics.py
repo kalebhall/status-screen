@@ -170,6 +170,11 @@ class StatusFromIcsTests(unittest.TestCase):
         self.assertIsNotNone(work_status)
         self.assertEqual(work_status["until"], "2024-01-08T09:00:00+00:00")
 
+    def test_working_hours_detail_uses_12_hour_format(self):
+        work_hours = self.build_work_hours(start="09:00", end="17:00", days="Mon-Fri")
+        detail = status_from_ics.format_work_hours_detail(work_hours)
+        self.assertEqual(detail, "Outside working hours (9:00 AM-5:00 PM)")
+
     def test_overnight_work_hours_span_midnight(self):
         work_hours = self.build_work_hours(start="22:00", end="06:00", days="Mon-Fri")
         now = datetime(2024, 1, 2, 1, 0, tzinfo=timezone.utc)

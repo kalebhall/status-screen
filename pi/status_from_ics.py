@@ -382,7 +382,16 @@ def next_work_start(now_local: datetime, config: dict) -> datetime | None:
 def format_work_hours_detail(config: dict) -> str:
     start_hour, start_minute = config["start"]
     end_hour, end_minute = config["end"]
-    return f"Outside working hours ({start_hour:02d}:{start_minute:02d}-{end_hour:02d}:{end_minute:02d})"
+    start_display = format_time_12h(start_hour, start_minute)
+    end_display = format_time_12h(end_hour, end_minute)
+    return f"Outside working hours ({start_display}-{end_display})"
+
+def format_time_12h(hour: int, minute: int) -> str:
+    period = "AM" if hour < 12 else "PM"
+    hour_12 = hour % 12
+    if hour_12 == 0:
+        hour_12 = 12
+    return f"{hour_12}:{minute:02d} {period}"
 
 def working_hours_status(config: dict | None, now: datetime | None = None) -> dict | None:
     if not config:
