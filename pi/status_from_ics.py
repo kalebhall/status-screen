@@ -2,7 +2,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -544,89 +544,17 @@ def fetch_ics_text(ics_url: str, cache_path: str) -> str:
             return cached_text
         raise
 
-def iter_event_extra_items(event):
-    for container in (getattr(event, "extra", None), getattr(event, "_unused", None)):
-        if not container:
-            continue
-        if isinstance(container, dict):
-            for key, value in container.items():
-                yield key, value
-            continue
-        for item in container:
-            yield item
-
 def extract_event_tzid(event, prop_name: str) -> str | None:
     target = prop_name.upper()
-    for item in iter_event_extra_items(event):
-        if isinstance(item, str):
-            raw = item.strip()
-            if not raw:
-                continue
-            header = raw.split(":", 1)[0]
-            header_key = header.split(";", 1)[0].strip().upper()
-            if header_key != target:
-                continue
-            for segment in header.split(";")[1:]:
-                if segment.upper().startswith("TZID="):
-                    tzid = segment.split("=", 1)[1].strip()
-                    if tzid:
-                        return tzid
-            continue
-        name = None
-        value_obj = item
-        if isinstance(item, tuple) and len(item) >= 2:
-            name = item[0]
-            value_obj = item[1]
-        name = name or getattr(value_obj, "name", None) or getattr(value_obj, "_name", None)
-        if not name:
-            continue
-        name_text = str(name).strip()
-        name_key = name_text.split(";", 1)[0].upper()
-        if name_key != target:
-            continue
-        if ";" in name_text:
-            for segment in name_text.split(";")[1:]:
-                if segment.upper().startswith("TZID="):
-                    tzid = segment.split("=", 1)[1].strip()
-                    if tzid:
-                        return tzid
-        value_candidates = []
-        if isinstance(value_obj, (list, tuple)):
-            value_candidates.extend(value_obj)
-        else:
-            value_candidates.append(value_obj)
-        for candidate in value_candidates:
-            params = getattr(candidate, "params", None) or getattr(candidate, "_params", None)
-            if not params:
-                continue
+    if hasattr(event, "get"):
+        prop = event.get(target)
+        if prop is not None:
+            params = getattr(prop, "params", None) or {}
             tzid = params.get("TZID") or params.get("tzid")
             if isinstance(tzid, (list, tuple)):
                 tzid = tzid[0] if tzid else None
             if tzid:
                 return str(tzid)
-    serialize = getattr(event, "serialize", None)
-    if callable(serialize):
-        try:
-            raw = serialize()
-        except Exception:
-            raw = ""
-        for line in str(raw).splitlines():
-            header = line.split(":", 1)[0].strip()
-            header_key = header.split(";", 1)[0].strip().upper()
-            if header_key != target:
-                continue
-            for segment in header.split(";")[1:]:
-                if segment.upper().startswith("TZID="):
-                    tzid = segment.split("=", 1)[1].strip()
-                    if tzid:
-                        return tzid
-    begin = getattr(event, "begin", None)
-    if begin is not None:
-        tzinfo = getattr(begin, "tzinfo", None)
-        if tzinfo is not None:
-            name = getattr(tzinfo, "zone", None) or getattr(tzinfo, "key", None)
-            if name:
-                return str(name)
     return None
 
 def apply_event_tzid(dt: datetime, event, prop_name: str) -> datetime:
@@ -644,11 +572,36 @@ def apply_event_tzid(dt: datetime, event, prop_name: str) -> datetime:
         return dt.replace(tzinfo=tzinfo)
     return dt
 
+def event_prop_datetime(event, prop_name: str, local_tz) -> datetime | None:
+    prop = event.get(prop_name)
+    if prop is None:
+        return None
+    dt_value = prop.dt
+    tzid = extract_event_tzid(event, prop_name)
+    tzinfo = resolve_tzinfo(tzid) if tzid else None
+    if isinstance(dt_value, datetime):
+        if dt_value.tzinfo is None:
+            dt_value = dt_value.replace(tzinfo=tzinfo or local_tz)
+        elif tzinfo and dt_value.utcoffset() == timedelta(0) and tzid not in {"UTC", "Etc/UTC"}:
+            dt_value = dt_value.replace(tzinfo=tzinfo)
+        return dt_value
+    if isinstance(dt_value, date):
+        return datetime(dt_value.year, dt_value.month, dt_value.day, tzinfo=tzinfo or local_tz)
+    return None
+
 def event_times_to_local(event, local_tz) -> tuple[datetime, datetime]:
-    start = event.begin.datetime
-    end = event.end.datetime
-    if start is None or end is None:
-        raise ValueError("Event start/end missing")
+    start = event_prop_datetime(event, "DTSTART", local_tz)
+    end = event_prop_datetime(event, "DTEND", local_tz)
+    if start is None:
+        raise ValueError("Event start missing")
+    if end is None:
+        duration = event.get("DURATION")
+        if duration is not None:
+            duration_value = getattr(duration, "dt", duration)
+            if isinstance(duration_value, timedelta):
+                end = start + duration_value
+    if end is None:
+        end = start
     if logging.getLogger().isEnabledFor(logging.DEBUG):
         logging.debug(
             "Event %s raw start=%s tz=%s end=%s tz=%s",
@@ -675,29 +628,11 @@ def event_times_to_local(event, local_tz) -> tuple[datetime, datetime]:
         )
     return start_local, end_local
 
-def extract_event_extra_values(event):
-    for container in (getattr(event, "extra", None), getattr(event, "_unused", None)):
-        if not container:
-            continue
-        if isinstance(container, dict):
-            for key, value in container.items():
-                yield key, value
-            continue
-        for item in container:
-            if isinstance(item, tuple) and len(item) >= 2:
-                yield item[0], item[1]
-                continue
-            name = getattr(item, "name", None) or getattr(item, "_name", None)
-            value = getattr(item, "value", None) or getattr(item, "_value", None)
-            if name is not None:
-                yield name, value
-
 def microsoft_busy_status(event) -> str | None:
-    for name, value in extract_event_extra_values(event):
-        if not name:
-            continue
-        if str(name).strip().upper() != "X-MICROSOFT-CDO-BUSYSTATUS":
-            continue
+    if hasattr(event, "get"):
+        value = event.get("X-MICROSOFT-CDO-BUSYSTATUS")
+        if value is None:
+            return None
         raw_value = "" if value is None else str(value)
         status = raw_value.strip().lower()
         if status in {"free", "busy"}:
@@ -708,39 +643,54 @@ def microsoft_busy_status(event) -> str | None:
             return status
     return None
 
-def is_all_day_event(e) -> bool:
+def is_all_day_event(event) -> bool:
     try:
-        start = e.begin.datetime
-        end = e.end.datetime
-        if start.hour == 0 and start.minute == 0 and start.second == 0:
-            dur = end - start
-            return dur >= timedelta(hours=23)
+        start = event.get("DTSTART")
+        if start is None:
+            return False
+        start_value = start.dt
+        if isinstance(start_value, date) and not isinstance(start_value, datetime):
+            return True
+        end = event.get("DTEND")
+        if end is None:
+            return False
+        end_value = end.dt
+        if isinstance(end_value, date) and not isinstance(end_value, datetime):
+            return True
     except Exception:
         pass
     return False
 
-def current_calendar_event(ics_text: str) -> dict | None:
-    from ics import Calendar
+def parse_icalendar(ics_text: str):
+    from icalendar import Calendar
 
+    return Calendar.from_ical(ics_text)
+
+def expanded_events(calendar, start: datetime, end: datetime):
+    from recurring_ical_events import of
+
+    try:
+        return list(of(calendar).between(start, end))
+    except Exception:
+        logging.debug("Failed to expand recurring events", exc_info=True)
+        return list(calendar.walk("VEVENT"))
+
+def current_calendar_event(ics_text: str) -> dict | None:
     local_tz = get_local_tz()
     if local_tz is None:
         return None
     now = now_local(local_tz)
     try:
-        cal = Calendar(ics_text)
+        cal = parse_icalendar(ics_text)
     except Exception:
         logging.exception("Failed to parse ICS calendar")
         return None
 
-    try:
-        timeline_events = list(cal.timeline.at(now))
-    except Exception:
-        logging.debug("Failed to read timeline events for current time", exc_info=True)
-        timeline_events = None
-
     active = []
-    for e in (timeline_events if timeline_events is not None else cal.events):
-        name = e.name or "Meeting"
+    window_start = now - timedelta(days=1)
+    window_end = now + timedelta(days=1)
+    for e in expanded_events(cal, window_start, window_end):
+        name = str(e.get("SUMMARY") or "Meeting")
         if should_ignore(name):
             continue
         try:
@@ -764,48 +714,20 @@ def current_calendar_event(ics_text: str) -> dict | None:
     return {"name": active[0][2], "end": active[0][1], "busy_status": active[0][3]}
 
 def next_calendar_event(ics_text: str) -> dict | None:
-    from ics import Calendar
-
     local_tz = get_local_tz()
     if local_tz is None:
         return None
     now = now_local(local_tz)
     try:
-        cal = Calendar(ics_text)
+        cal = parse_icalendar(ics_text)
     except Exception:
         logging.exception("Failed to parse ICS calendar")
         return None
-    try:
-        timeline_events = cal.timeline.start_after(now)
-    except Exception:
-        logging.debug("Failed to read timeline events after current time", exc_info=True)
-        timeline_events = None
-
-    if timeline_events is not None:
-        for e in timeline_events:
-            name = e.name or "Meeting"
-            if should_ignore(name):
-                continue
-            try:
-                start_local, end_local = event_times_to_local(e, local_tz)
-            except Exception:
-                logging.debug("Failed to parse event times for %s", name)
-                continue
-            if start_local <= now:
-                continue
-            busy_status = microsoft_busy_status(e) if USE_MS_BUSY_STATUS else None
-            event_is_ooo = is_ooo(name) or busy_status == "ooo"
-            if ALLDAY_ONLY_COUNTS_IF_OOO and is_all_day_event(e) and not event_is_ooo:
-                continue
-            if busy_status == "free":
-                continue
-            return {"name": name, "start": start_local}
-        return None
 
     upcoming = []
-
-    for e in cal.events:
-        name = e.name or "Meeting"
+    window_end = now + timedelta(days=90)
+    for e in expanded_events(cal, now, window_end):
+        name = str(e.get("SUMMARY") or "Meeting")
         if should_ignore(name):
             continue
         try:
