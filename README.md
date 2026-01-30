@@ -194,3 +194,8 @@ DISPLAY_NAMES='["Team A","Team B"]'
 
 If you only need one group, keep just one entry in each array (and optionally supply a
 single `DISPLAY_NAMES` entry). The UI will display just that single group.
+
+When multiple groups are configured, the control page shows a person selector so overrides
+apply to an individual instead of everyone. If you reuse a single `AUTH_TOKENS` entry for
+multiple groups, include `group_index` in the override/clear request body (0-based) to
+target the right person.
