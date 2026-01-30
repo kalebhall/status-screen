@@ -127,6 +127,28 @@ class StatusFromIcsTests(unittest.TestCase):
         self.assertIsNotNone(event)
         self.assertEqual(event["name"], "Local Time Meeting")
 
+    def test_windows_tzid_event_maps_to_iana_timezone(self):
+        status_from_ics.TIMEZONE_NAME = "America/Los_Angeles"
+        local_tz = status_from_ics.resolve_tzinfo("America/Los_Angeles")
+        self.set_now(datetime(2024, 1, 1, 9, 30, tzinfo=local_tz))
+        ics_text = "\n".join(
+            [
+                "BEGIN:VCALENDAR",
+                "VERSION:2.0",
+                "BEGIN:VEVENT",
+                "UID:event-1",
+                "DTSTAMP:20240101T090000Z",
+                "DTSTART;TZID=Pacific Standard Time:20240101T090000",
+                "DTEND;TZID=Pacific Standard Time:20240101T100000",
+                "SUMMARY:Windows TZ Meeting",
+                "END:VEVENT",
+                "END:VCALENDAR",
+            ]
+        )
+        event = status_from_ics.current_calendar_event(ics_text)
+        self.assertIsNotNone(event)
+        self.assertEqual(event["name"], "Windows TZ Meeting")
+
     def test_working_hours_before_start_is_ooo(self):
         work_hours = self.build_work_hours()
         now = datetime(2024, 1, 1, 8, 30, tzinfo=timezone.utc)

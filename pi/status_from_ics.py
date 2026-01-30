@@ -238,12 +238,17 @@ def resolve_tzinfo(name: str | None):
 
     if not name:
         return None
+    mapped = map_windows_tz(name)
+    mapped_tz = tz.gettz(mapped) if mapped else None
     tzinfo = tz.gettz(name)
     if tzinfo is not None:
+        if mapped_tz and name.strip().lower() not in {"utc", "etc/utc"}:
+            now = datetime.now(timezone.utc)
+            if tzinfo.utcoffset(now) == timedelta(0):
+                return mapped_tz
         return tzinfo
-    mapped = map_windows_tz(name)
-    if mapped:
-        return tz.gettz(mapped)
+    if mapped_tz:
+        return mapped_tz
     return None
 
 def coerce_event_timezone(dt: datetime, local_tz) -> datetime:
