@@ -589,6 +589,8 @@ def apply_event_tzid(dt: datetime, event, prop_name: str) -> datetime:
         return dt
     if dt.tzinfo is None:
         return dt.replace(tzinfo=tzinfo)
+    if dt.utcoffset() == timedelta(0) and tzid.upper() not in {"UTC", "Etc/UTC"}:
+        return dt.replace(tzinfo=tzinfo)
     return dt
 
 def event_times_to_local(event, local_tz) -> tuple[datetime, datetime]:
