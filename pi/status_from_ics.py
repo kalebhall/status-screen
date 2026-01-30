@@ -136,11 +136,7 @@ def build_groups() -> list[dict]:
             name_suffix = f"-{safe_name}" if safe_name else ""
             suffix = f"-{index + 1}{name_suffix}"
             cache_path = f"{cache_root}{suffix}{cache_ext}" if cache_ext else f"{base_cache}{suffix}"
-            status_path = (
-                STATUS_JSON_PATH
-                if index == 0
-                else os.path.join(RUNTIME_DIR, f"status-{index + 1}.json")
-            )
+            status_path = os.path.join(RUNTIME_DIR, f"status-{index + 1}.json")
             override_path = os.path.join(RUNTIME_DIR, f"override-{index + 1}.json")
         start_value = work_hour_starts[index] if index < len(work_hour_starts) else WORK_HOURS_START
         end_value = work_hour_ends[index] if index < len(work_hour_ends) else WORK_HOURS_END
@@ -890,10 +886,19 @@ def main():
             payload = resolve_and_write(group)
             payload["name"] = group["display_name"]
             people.append(payload)
+        payload = {
+            "generated": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "people": people,
+        }
+        os.makedirs(os.path.dirname(STATUS_JSON_PATH), exist_ok=True)
+        tmp = STATUS_JSON_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(payload, f)
+        os.replace(tmp, STATUS_JSON_PATH)
         os.makedirs(os.path.dirname(STATUS_MULTI_JSON_PATH), exist_ok=True)
         tmp = STATUS_MULTI_JSON_PATH + ".tmp"
         with open(tmp, "w") as f:
-            json.dump({"generated": datetime.utcnow().isoformat(timespec="seconds") + "Z", "people": people}, f)
+            json.dump(payload, f)
         os.replace(tmp, STATUS_MULTI_JSON_PATH)
         time.sleep(POLL_SECONDS)
 
