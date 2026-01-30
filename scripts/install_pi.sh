@@ -26,7 +26,7 @@ rsync -a --delete --exclude '.git' "$REPO_DIR/" "$RUNTIME_DIR/"
 
 sudo -u "$STATUS_SCREEN_USER" python3 -m venv "$RUNTIME_DIR/.venv"
 sudo -u "$STATUS_SCREEN_USER" "$RUNTIME_DIR/.venv/bin/pip" install --upgrade pip
-sudo -u "$STATUS_SCREEN_USER" "$RUNTIME_DIR/.venv/bin/pip" install requests ics python-dateutil flask
+sudo -u "$STATUS_SCREEN_USER" "$RUNTIME_DIR/.venv/bin/pip" install requests icalendar recurring-ical-events python-dateutil flask
 
 # Web
 sudo rm -rf /var/www/html/*
