@@ -604,6 +604,22 @@ def extract_event_tzid(event, prop_name: str) -> str | None:
                 tzid = tzid[0] if tzid else None
             if tzid:
                 return str(tzid)
+    serialize = getattr(event, "serialize", None)
+    if callable(serialize):
+        try:
+            raw = serialize()
+        except Exception:
+            raw = ""
+        for line in str(raw).splitlines():
+            header = line.split(":", 1)[0].strip()
+            header_key = header.split(";", 1)[0].strip().upper()
+            if header_key != target:
+                continue
+            for segment in header.split(";")[1:]:
+                if segment.upper().startswith("TZID="):
+                    tzid = segment.split("=", 1)[1].strip()
+                    if tzid:
+                        return tzid
     begin = getattr(event, "begin", None)
     if begin is not None:
         tzinfo = getattr(begin, "tzinfo", None)
