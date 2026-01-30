@@ -161,6 +161,13 @@ Optional parameters let you tune polling and the busy label:
 .\windows\status_agent.ps1 -PiBaseUrl "http://<pi-ip>" -Token "<AUTH_TOKEN>" -PollSeconds 10 -BusyMinutes 5 -BusyDetail "On a call (mic active)"
 ```
 
+To run it in the background with Task Scheduler (no taskbar window), use the VBScript
+launcher and point your task at `wscript.exe`:
+
+```
+wscript.exe "C:\path\to\status_agent_hidden.vbs" -ExecutionPolicy Bypass -NonInteractive -WindowStyle Hidden -File "C:\path\to\status_agent.ps1" -PiBaseUrl "http://<pi-ip>" -Token "<AUTH_TOKEN>"
+```
+
 Calendar BUSY/IN A MEETING states take priority over the mic-active override.
 
 ## Kiosk mode (full-screen display)
