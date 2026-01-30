@@ -65,7 +65,6 @@ def configure_logging():
 
 configure_logging()
 
-ICS_URL = os.environ.get("ICS_URL", "")
 TIMEZONE_NAME = os.environ.get("TIMEZONE_NAME", "America/Los_Angeles")
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "30"))
 ICS_REFRESH_SECONDS = int(
@@ -103,18 +102,8 @@ def parse_env_list(key: str) -> list[str]:
 
 def build_groups() -> list[dict]:
     ics_urls = parse_env_list("ICS_URLS")
-    if not ics_urls and ICS_URL:
-        ics_urls = [ICS_URL]
     display_names = parse_env_list("DISPLAY_NAMES")
-    if not display_names:
-        single_name = os.environ.get("DISPLAY_NAME", "").strip()
-        if single_name:
-            display_names = [single_name]
     auth_tokens = parse_env_list("AUTH_TOKENS")
-    if not auth_tokens:
-        single_token = os.environ.get("AUTH_TOKEN", "").strip()
-        if single_token:
-            auth_tokens = [single_token]
     work_hour_starts = parse_env_list("WORK_HOURS_STARTS")
     work_hour_ends = parse_env_list("WORK_HOURS_ENDS")
     work_hour_days = parse_env_list("WORK_HOURS_DAYS_LIST")
@@ -507,9 +496,9 @@ def fetch_ics_text(ics_url: str, cache_path: str) -> str:
 
     if not ics_url:
         if cached_text:
-            logging.warning("ICS_URL is not set; using cached ICS")
+            logging.warning("ICS_URLS entry is not set; using cached ICS")
             return cached_text
-        raise RuntimeError("ICS_URL is not set")
+        raise RuntimeError("ICS_URLS entry is not set")
     fetch_url = ics_url
     parsed = urlparse(fetch_url)
     if parsed.scheme in {"webcal", "webcals"}:
