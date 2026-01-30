@@ -9,7 +9,6 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 RUNTIME_DIR = os.environ.get("STATUS_SCREEN_DIR", "/home/pi/status-screen")
 
 STATUS_JSON_PATH = os.path.join(RUNTIME_DIR, "status.json")
-STATUS_MULTI_JSON_PATH = os.path.join(RUNTIME_DIR, "status-multi.json")
 OVERRIDE_JSON_PATH = os.path.join(RUNTIME_DIR, "override.json")
 
 logging.basicConfig(
@@ -126,7 +125,6 @@ def build_groups() -> list[dict]:
         )
         if group_count == 1:
             cache_path = base_cache
-            status_path = STATUS_JSON_PATH
             override_path = OVERRIDE_JSON_PATH
         else:
             safe_name = "".join(
@@ -136,7 +134,6 @@ def build_groups() -> list[dict]:
             name_suffix = f"-{safe_name}" if safe_name else ""
             suffix = f"-{index + 1}{name_suffix}"
             cache_path = f"{cache_root}{suffix}{cache_ext}" if cache_ext else f"{base_cache}{suffix}"
-            status_path = os.path.join(RUNTIME_DIR, f"status-{index + 1}.json")
             override_path = os.path.join(RUNTIME_DIR, f"override-{index + 1}.json")
         start_value = work_hour_starts[index] if index < len(work_hour_starts) else WORK_HOURS_START
         end_value = work_hour_ends[index] if index < len(work_hour_ends) else WORK_HOURS_END
@@ -148,7 +145,6 @@ def build_groups() -> list[dict]:
                 "display_name": display_name,
                 "auth_token": auth_tokens[index] if index < len(auth_tokens) else "",
                 "cache_path": cache_path,
-                "status_path": status_path,
                 "override_path": override_path,
                 "work_hours": build_work_hours_config(start_value, end_value, days_value, index),
             }
@@ -417,7 +413,7 @@ def write_status(
     until: str | None = None,
     next_event_at: str | None = None,
     name: str | None = None,
-    status_path: str = STATUS_JSON_PATH,
+    status_path: str | None = STATUS_JSON_PATH,
 ):
     payload = {
         "state": state,
@@ -434,11 +430,12 @@ def write_status(
     if name:
         payload["name"] = name
     logging.debug("Writing status: %s", payload)
-    os.makedirs(os.path.dirname(status_path), exist_ok=True)
-    tmp = status_path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(payload, f)
-    os.replace(tmp, status_path)
+    if status_path:
+        os.makedirs(os.path.dirname(status_path), exist_ok=True)
+        tmp = status_path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(payload, f)
+        os.replace(tmp, status_path)
     return payload
 
 def is_ooo(text: str) -> bool:
@@ -795,7 +792,7 @@ def resolve_and_write(group: dict) -> dict:
                     until=until,
                     next_event_at=next_event_at,
                     name=display_name,
-                    status_path=group["status_path"],
+                    status_path=None,
                 )
             elif is_ooo(name):
                 return write_status(
@@ -806,7 +803,7 @@ def resolve_and_write(group: dict) -> dict:
                     until=until,
                     next_event_at=next_event_at,
                     name=display_name,
-                    status_path=group["status_path"],
+                    status_path=None,
                 )
             else:
                 return write_status(
@@ -817,7 +814,7 @@ def resolve_and_write(group: dict) -> dict:
                     until=until,
                     next_event_at=next_event_at,
                     name=display_name,
-                    status_path=group["status_path"],
+                    status_path=None,
                 )
     except Exception as ex:
         logging.exception("Failed to resolve calendar status")
@@ -833,7 +830,7 @@ def resolve_and_write(group: dict) -> dict:
             until=override.get("until"),
             next_event_at=next_event_at,
             name=display_name,
-            status_path=group["status_path"],
+            status_path=None,
         )
 
     work_status = working_hours_status(group.get("work_hours"))
@@ -846,7 +843,7 @@ def resolve_and_write(group: dict) -> dict:
             until=work_status.get("until"),
             next_event_at=next_event_at,
             name=display_name,
-            status_path=group["status_path"],
+            status_path=None,
         )
 
     if error_detail:
@@ -856,7 +853,7 @@ def resolve_and_write(group: dict) -> dict:
             error_detail,
             source="error",
             name=display_name,
-            status_path=group["status_path"],
+            status_path=None,
         )
 
     return write_status(
@@ -866,20 +863,33 @@ def resolve_and_write(group: dict) -> dict:
         source="default",
         next_event_at=next_event_at,
         name=display_name,
-        status_path=group["status_path"],
+        status_path=None,
     )
 
 def main():
     groups = build_groups()
+    boot_people = []
     for group in groups:
-        write_status(
-            "available",
-            "AVAILABLE",
-            "",
-            source="boot",
-            name=group.get("display_name", ""),
-            status_path=group["status_path"],
+        boot_people.append(
+            write_status(
+                "available",
+                "AVAILABLE",
+                "",
+                source="boot",
+                name=group.get("display_name", ""),
+                status_path=None,
+            )
         )
+    if boot_people:
+        payload = {
+            "generated": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "people": boot_people,
+        }
+        os.makedirs(os.path.dirname(STATUS_JSON_PATH), exist_ok=True)
+        tmp = STATUS_JSON_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(payload, f)
+        os.replace(tmp, STATUS_JSON_PATH)
     while True:
         people = []
         for group in groups:
@@ -895,11 +905,6 @@ def main():
         with open(tmp, "w") as f:
             json.dump(payload, f)
         os.replace(tmp, STATUS_JSON_PATH)
-        os.makedirs(os.path.dirname(STATUS_MULTI_JSON_PATH), exist_ok=True)
-        tmp = STATUS_MULTI_JSON_PATH + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(payload, f)
-        os.replace(tmp, STATUS_MULTI_JSON_PATH)
         time.sleep(POLL_SECONDS)
 
 if __name__ == "__main__":
