@@ -103,6 +103,18 @@ If you prefer to keep meeting titles off the display, disable event details:
 SHOW_EVENT_DETAILS="false"
 ```
 
+## E-ink display mode
+
+Set a display mode to optimize the UI for grayscale or 3-color e-ink panels:
+
+```bash
+DISPLAY_MODE="grayscale"
+# or
+DISPLAY_MODE="tricolor"
+```
+
+The default `DISPLAY_MODE="color"` keeps the original dark theme.
+
 ## Custom CA certificates (Fortigate DPI, etc.)
 
 If your network uses a custom TLS inspection certificate, set one of these environment variables so `requests` trusts it when downloading the ICS feed:
