@@ -125,6 +125,19 @@ ROWS_PER_COLUMN="2"
 
 If unset, the UI defaults to a single column containing everyone.
 
+## Single-person display via query parameter
+
+If you want to show just one person on the status screen (for example, on a dedicated wall
+display), add the `person` query parameter to the URL. The match is case-insensitive and
+uses the `name` field from the status payload:
+
+```
+http://<pi-ip>/?person=alex
+```
+
+If the selected person is not found, the UI shows a NOT FOUND error state instead of an
+empty screen.
+
 ## Custom CA certificates (Fortigate DPI, etc.)
 
 If your network uses a custom TLS inspection certificate, set one of these environment variables so `requests` trusts it when downloading the ICS feed:
