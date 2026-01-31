@@ -7,14 +7,47 @@
   <style>
     :root {
       color-scheme: only dark;
+      --screen-bg: #000000;
+      --text-color: #ffffff;
+      --divider-color: rgba(255, 255, 255, 0.2);
+      --available-bg: #00a651;
+      --busy-bg: #c0392b;
+      --meeting-bg: #2980b9;
+      --ooo-bg: #8e44ad;
+      --error-bg: #7f8c8d;
+      --icon-shadow: drop-shadow(0 4px 4px rgba(0, 0, 0, 0.35));
     }
     body {
       margin: 0;
       font-family: Arial, sans-serif;
-      background: black;
-      color: white;
+      background: var(--screen-bg);
+      color: var(--text-color);
       overflow: hidden;
       cursor: none;
+    }
+    body.display-grayscale {
+      color-scheme: only light;
+      --screen-bg: #f7f7f7;
+      --text-color: #111111;
+      --divider-color: rgba(0, 0, 0, 0.2);
+      --available-bg: #f7f7f7;
+      --busy-bg: #d0d0d0;
+      --meeting-bg: #b8b8b8;
+      --ooo-bg: #c8c8c8;
+      --error-bg: #a0a0a0;
+      --icon-shadow: none;
+    }
+    body.display-tricolor {
+      color-scheme: only light;
+      --screen-bg: #ffffff;
+      --text-color: #111111;
+      --divider-color: rgba(0, 0, 0, 0.3);
+      --available-bg: #ffffff;
+      --busy-bg: #d32f2f;
+      --meeting-bg: #e0e0e0;
+      --ooo-bg: #b71c1c;
+      --error-bg: #555555;
+      --icon-shadow: none;
     }
     .screen {
       width: 100vw;
@@ -36,7 +69,7 @@
       box-sizing: border-box;
     }
     .row + .row {
-      border-top: 4px solid rgba(255, 255, 255, 0.2);
+      border-top: 4px solid var(--divider-color);
     }
     .label-row {
       display: flex;
@@ -59,7 +92,7 @@
     .status-icon {
       font-size: calc(120px * var(--font-scale, 1));
       line-height: 1.0;
-      filter: drop-shadow(0 4px 4px rgba(0,0,0,0.35));
+      filter: var(--icon-shadow);
     }
     .detail {
       font-size: calc(64px * var(--font-scale, 1));
@@ -72,11 +105,11 @@
       opacity: 0.85;
       text-transform: none;
     }
-    .available { background: #00a651; }
-    .busy { background: #c0392b; }
-    .meeting { background: #2980b9; }
-    .ooo { background: #8e44ad; }
-    .error { background: #7f8c8d; }
+    .available { background: var(--available-bg); }
+    .busy { background: var(--busy-bg); }
+    .meeting { background: var(--meeting-bg); }
+    .ooo { background: var(--ooo-bg); }
+    .error { background: var(--error-bg); }
     .footer {
       position: absolute;
       bottom: 20px;
@@ -321,8 +354,29 @@
         return;
       }
       const people = Array.isArray(data.people) ? data.people : [data];
+      applyDisplayMode(resolveDisplayMode(data, people));
       setRowCount(people.length);
       people.forEach((person, index) => updateRow(index, person));
+    }
+
+    function resolveDisplayMode(data, people) {
+      if (data && data.display_mode) {
+        return data.display_mode;
+      }
+      if (people && people.length > 0 && people[0].display_mode) {
+        return people[0].display_mode;
+      }
+      return "color";
+    }
+
+    function applyDisplayMode(mode) {
+      const normalized = (mode || "color").toLowerCase();
+      document.body.classList.remove("display-grayscale", "display-tricolor");
+      if (normalized === "grayscale") {
+        document.body.classList.add("display-grayscale");
+      } else if (normalized === "tricolor") {
+        document.body.classList.add("display-tricolor");
+      }
     }
 
     setInterval(updateClock, 1000);

@@ -86,6 +86,17 @@ IGNORE_KEYWORDS = ["cancelled", "canceled"]
 ALLDAY_ONLY_COUNTS_IF_OOO = parse_env_bool("ALLDAY_ONLY_COUNTS_IF_OOO", True)
 USE_MS_BUSY_STATUS = parse_env_bool("USE_MS_BUSY_STATUS", False)
 SHOW_EVENT_DETAILS = parse_env_bool("SHOW_EVENT_DETAILS", True)
+DISPLAY_MODE_RAW = os.environ.get("DISPLAY_MODE", "color").strip().lower()
+DISPLAY_MODE_OPTIONS = {"color", "grayscale", "tricolor"}
+if DISPLAY_MODE_RAW not in DISPLAY_MODE_OPTIONS:
+    logging.warning(
+        "Unknown DISPLAY_MODE=%s, defaulting to color. Options: %s",
+        DISPLAY_MODE_RAW,
+        ", ".join(sorted(DISPLAY_MODE_OPTIONS)),
+    )
+    DISPLAY_MODE = "color"
+else:
+    DISPLAY_MODE = DISPLAY_MODE_RAW
 
 def parse_env_list(key: str) -> list[str]:
     raw = os.environ.get(key, "").strip()
@@ -421,6 +432,7 @@ def write_status(
         "detail": detail,
         "source": source,
         "time_zone": TIMEZONE_NAME,
+        "display_mode": DISPLAY_MODE,
         "updated": datetime.now().isoformat(timespec="seconds"),
     }
     if until:
@@ -883,6 +895,7 @@ def main():
     if boot_people:
         payload = {
             "generated": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "display_mode": DISPLAY_MODE,
             "people": boot_people,
         }
         os.makedirs(os.path.dirname(STATUS_JSON_PATH), exist_ok=True)
@@ -898,6 +911,7 @@ def main():
             people.append(payload)
         payload = {
             "generated": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "display_mode": DISPLAY_MODE,
             "people": people,
         }
         os.makedirs(os.path.dirname(STATUS_JSON_PATH), exist_ok=True)
