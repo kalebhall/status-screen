@@ -53,6 +53,20 @@ def parse_env_falsey(raw: str | None) -> bool:
     value = raw.strip().lower()
     return value in {"0", "false", "no", "n", "off"}
 
+def parse_env_positive_int(key: str) -> int | None:
+    raw = os.environ.get(key)
+    if raw is None:
+        return None
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        logging.warning("Invalid %s=%s; expected integer.", key, raw)
+        return None
+    if value <= 0:
+        logging.warning("Invalid %s=%s; expected positive integer.", key, raw)
+        return None
+    return value
+
 def configure_logging():
     level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
     level = logging.INFO
@@ -97,6 +111,7 @@ if DISPLAY_MODE_RAW not in DISPLAY_MODE_OPTIONS:
     DISPLAY_MODE = "color"
 else:
     DISPLAY_MODE = DISPLAY_MODE_RAW
+ROWS_PER_COLUMN = parse_env_positive_int("ROWS_PER_COLUMN")
 
 def parse_env_list(key: str) -> list[str]:
     raw = os.environ.get(key, "").strip()
@@ -898,6 +913,8 @@ def main():
             "display_mode": DISPLAY_MODE,
             "people": boot_people,
         }
+        if ROWS_PER_COLUMN:
+            payload["rows_per_column"] = ROWS_PER_COLUMN
         os.makedirs(os.path.dirname(STATUS_JSON_PATH), exist_ok=True)
         tmp = STATUS_JSON_PATH + ".tmp"
         with open(tmp, "w") as f:
@@ -914,6 +931,8 @@ def main():
             "display_mode": DISPLAY_MODE,
             "people": people,
         }
+        if ROWS_PER_COLUMN:
+            payload["rows_per_column"] = ROWS_PER_COLUMN
         os.makedirs(os.path.dirname(STATUS_JSON_PATH), exist_ok=True)
         tmp = STATUS_JSON_PATH + ".tmp"
         with open(tmp, "w") as f:

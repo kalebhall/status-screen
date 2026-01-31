@@ -115,6 +115,16 @@ DISPLAY_MODE="tricolor"
 
 The default `DISPLAY_MODE="color"` keeps the original dark theme.
 
+## Column wrapping
+
+Control how many people appear in a column before the UI wraps into a new column:
+
+```bash
+ROWS_PER_COLUMN="2"
+```
+
+If unset, the UI defaults to a single column containing everyone.
+
 ## Custom CA certificates (Fortigate DPI, etc.)
 
 If your network uses a custom TLS inspection certificate, set one of these environment variables so `requests` trusts it when downloading the ICS feed:

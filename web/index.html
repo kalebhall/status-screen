@@ -53,9 +53,19 @@
       width: 100vw;
       height: 100vh;
       display: flex;
+      flex-direction: row;
+      align-items: stretch;
+      justify-content: stretch;
+    }
+    .column {
+      flex: 1;
+      display: flex;
       flex-direction: column;
       align-items: stretch;
       justify-content: stretch;
+    }
+    .column + .column {
+      border-left: 4px solid var(--divider-color);
     }
     .row {
       flex: 1;
@@ -128,6 +138,8 @@
     const screen = document.getElementById("screen");
     let rows = [];
     let rowState = [];
+    let columnCount = 0;
+    let rowsPerColumn = 0;
 
     const iconByState = {
       available: "✅",
@@ -192,15 +204,42 @@
       return { row, name, icon, label, detail, nextEvent, countdown };
     }
 
-    function setRowCount(count) {
+    function createColumn() {
+      const column = document.createElement("div");
+      column.className = "column";
+      return column;
+    }
+
+    function resolveRowsPerColumn(data, people) {
+      const parsed = Number.parseInt(data && data.rows_per_column, 10);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed;
+      }
+      return people.length || 1;
+    }
+
+    function setRowCount(count, maxPerColumn) {
       const targetCount = Math.max(1, count);
-      if (rows.length === targetCount) {
+      const targetPerColumn = Math.max(1, maxPerColumn || targetCount);
+      const targetColumns = Math.max(1, Math.ceil(targetCount / targetPerColumn));
+      if (
+        rows.length === targetCount &&
+        columnCount === targetColumns &&
+        rowsPerColumn === targetPerColumn
+      ) {
         return;
       }
       screen.innerHTML = "";
       rows = [];
       rowState = [];
+      columnCount = targetColumns;
+      rowsPerColumn = targetPerColumn;
+      let column = null;
       for (let i = 0; i < targetCount; i += 1) {
+        if (i % targetPerColumn === 0) {
+          column = createColumn();
+          screen.appendChild(column);
+        }
         const row = createRow();
         rows.push(row);
         rowState.push({
@@ -211,9 +250,9 @@
           source: "",
           timeZone: null,
         });
-        screen.appendChild(row.row);
+        column.appendChild(row.row);
       }
-      screen.style.setProperty("--font-scale", fontScaleFor(targetCount));
+      screen.style.setProperty("--font-scale", fontScaleFor(targetPerColumn));
     }
 
     function formatCountdown(msRemaining) {
@@ -349,13 +388,14 @@
     async function loadStatus() {
       const data = await fetchStatusPayload();
       if (!data) {
-        setRowCount(1);
+        setRowCount(1, 1);
         updateRow(0, { state: "error", label: "STATUS ERROR", detail: "" });
         return;
       }
       const people = Array.isArray(data.people) ? data.people : [data];
       applyDisplayMode(resolveDisplayMode(data, people));
-      setRowCount(people.length);
+      const targetRowsPerColumn = resolveRowsPerColumn(data, people);
+      setRowCount(people.length, targetRowsPerColumn);
       people.forEach((person, index) => updateRow(index, person));
     }
 
