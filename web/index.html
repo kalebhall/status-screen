@@ -218,6 +218,15 @@
       return people.length || 1;
     }
 
+    function resolveSelectedPerson() {
+      const params = new URLSearchParams(window.location.search);
+      const name = params.get("person");
+      if (!name) {
+        return null;
+      }
+      return name.trim().toLowerCase() || null;
+    }
+
     function setRowCount(count, maxPerColumn) {
       const targetCount = Math.max(1, count);
       const targetPerColumn = Math.max(1, maxPerColumn || targetCount);
@@ -393,10 +402,24 @@
         return;
       }
       const people = Array.isArray(data.people) ? data.people : [data];
-      applyDisplayMode(resolveDisplayMode(data, people));
-      const targetRowsPerColumn = resolveRowsPerColumn(data, people);
-      setRowCount(people.length, targetRowsPerColumn);
-      people.forEach((person, index) => updateRow(index, person));
+      const selectedPerson = resolveSelectedPerson();
+      const filteredPeople = selectedPerson
+        ? people.filter((person) => (person.name || "").toLowerCase() === selectedPerson)
+        : people;
+      applyDisplayMode(resolveDisplayMode(data, filteredPeople));
+      if (selectedPerson && filteredPeople.length === 0) {
+        setRowCount(1, 1);
+        updateRow(0, {
+          state: "error",
+          label: "NOT FOUND",
+          detail: `No match for "${selectedPerson}".`,
+          name: "Unavailable",
+        });
+        return;
+      }
+      const targetRowsPerColumn = resolveRowsPerColumn(data, filteredPeople);
+      setRowCount(filteredPeople.length, targetRowsPerColumn);
+      filteredPeople.forEach((person, index) => updateRow(index, person));
     }
 
     function resolveDisplayMode(data, people) {
