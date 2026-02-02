@@ -115,6 +115,13 @@ DISPLAY_MODE="tricolor"
 
 The default `DISPLAY_MODE="color"` keeps the original dark theme.
 
+## ESP32 e-paper client
+
+If you want to drive a dedicated e-paper panel (such as the 5.79" CrowPanel) from the
+status server, there is an ESP32-S3 sketch in `esp32/` that polls `/status.json` every
+30 seconds and renders the status text on a black/white display. See
+`esp32/README.md` for wiring and library setup steps.
+
 ## Column wrapping
 
 Control how many people appear in a column before the UI wraps into a new column:
