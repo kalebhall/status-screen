@@ -142,6 +142,14 @@ def load_people_config() -> list[dict]:
             return [item for item in people if isinstance(item, dict)]
     return []
 
+def get_people_config_mtime() -> float | None:
+    if not os.path.exists(PEOPLE_JSON_PATH):
+        return None
+    try:
+        return os.path.getmtime(PEOPLE_JSON_PATH)
+    except OSError:
+        return None
+
 def person_auth_code(entry: dict) -> str:
     return (entry.get("auth_code") or entry.get("auth_token") or "").strip()
 
@@ -930,6 +938,7 @@ def resolve_and_write(group: dict) -> dict:
 
 def main():
     groups = build_groups()
+    people_config_mtime = get_people_config_mtime()
     boot_people = []
     for group in groups:
         boot_people.append(
@@ -956,6 +965,10 @@ def main():
             json.dump(payload, f)
         os.replace(tmp, STATUS_JSON_PATH)
     while True:
+        current_mtime = get_people_config_mtime()
+        if current_mtime != people_config_mtime:
+            groups = build_groups()
+            people_config_mtime = current_mtime
         people = []
         for group in groups:
             payload = resolve_and_write(group)
