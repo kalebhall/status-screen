@@ -31,6 +31,7 @@ sudo -u "$STATUS_SCREEN_USER" "$RUNTIME_DIR/.venv/bin/pip" install requests ical
 # Web
 sudo rm -rf /var/www/html/*
 sudo ln -sfn "$RUNTIME_DIR/web/index.html" /var/www/html/index.html
+sudo ln -sfn "$RUNTIME_DIR/web/admin.html" /var/www/html/admin.html
 sudo chown -R www-data:www-data /var/www/html
 sudo chmod -R 755 /var/www/html
 
