@@ -234,3 +234,49 @@ When multiple groups are configured, the control page shows a person selector so
 apply to an individual instead of everyone. If you reuse a single `AUTH_TOKENS` entry for
 multiple groups, include `group_index` in the override/clear request body (0-based) to
 target the right person.
+
+### Multi-person config via people.json
+
+If you prefer to avoid `.env` arrays, you can define people in a JSON file. Create
+`/home/pi/status-screen/people.json` (or the same path under `STATUS_SCREEN_DIR`) with a
+list of people or a `{"people": [...]}` object:
+
+```json
+[
+  {
+    "display_name": "Team A",
+    "ics_url": "https://calendar-1.ics",
+    "auth_code": "token-1",
+    "work_hours_start": "08:00",
+    "work_hours_end": "16:00",
+    "work_hour_days_list": "Mon-Fri"
+  },
+  {
+    "display_name": "Team B",
+    "ics_url": "https://calendar-2.ics",
+    "auth_code": "token-2",
+    "work_hours_start": "10:00",
+    "work_hours_end": "19:00",
+    "work_hour_days_list": "Tue-Sat"
+  }
+]
+```
+
+If a people file exists, it takes precedence over `ICS_URLS`, `AUTH_TOKENS`, and
+`DISPLAY_NAMES` in `.env`. Use `auth_code` (or `auth_token`) to match the control page token
+for a person.
+
+### Runtime directory overrides
+
+Both services read from a runtime directory (default `/home/pi/status-screen`). To override
+it, set `STATUS_SCREEN_DIR` in the systemd service or environment file before starting the
+services.
+
+### Logging and polling overrides
+
+You can tune logging verbosity and polling cadence via `.env`:
+
+```bash
+LOG_LEVEL="INFO"
+POLL_SECONDS="30"
+```
