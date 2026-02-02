@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0" />
+  <title>Status Admin</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page-bg: #f7f7f7;
+      --panel-bg: #ffffff;
+      --text-color: #1f2933;
+      --muted-color: #52606d;
+      --border-color: #d9e2ec;
+      --accent: #2563eb;
+      --accent-dark: #1e4bb8;
+      --danger: #dc2626;
+      --danger-dark: #b91c1c;
+      --success: #16a34a;
+      --focus-ring: rgba(37, 99, 235, 0.35);
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      color: var(--text-color);
+      background: var(--page-bg);
+      padding: 32px 20px 60px;
+    }
+    h1 {
+      font-size: 32px;
+      margin-bottom: 8px;
+    }
+    p {
+      color: var(--muted-color);
+      margin-top: 0;
+      margin-bottom: 24px;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(280px, 380px) minmax(420px, 1fr);
+      gap: 24px;
+      align-items: start;
+    }
+    .panel {
+      background: var(--panel-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 20px 24px;
+      box-shadow: 0 18px 30px rgba(15, 23, 42, 0.08);
+    }
+    .panel h2 {
+      margin-top: 0;
+      font-size: 20px;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    input, textarea, select {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border-color);
+      font-size: 14px;
+      font-family: inherit;
+    }
+    input:focus,
+    textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--focus-ring);
+    }
+    textarea {
+      resize: vertical;
+      min-height: 80px;
+    }
+    .field {
+      margin-bottom: 16px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .actions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-top: 12px;
+    }
+    button {
+      border: none;
+      border-radius: 10px;
+      padding: 10px 16px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 14px;
+    }
+    .primary {
+      background: var(--accent);
+      color: #ffffff;
+    }
+    .primary:hover {
+      background: var(--accent-dark);
+    }
+    .ghost {
+      background: transparent;
+      color: var(--accent);
+    }
+    .danger {
+      background: var(--danger);
+      color: #ffffff;
+    }
+    .danger:hover {
+      background: var(--danger-dark);
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #eff6ff;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .table th,
+    .table td {
+      text-align: left;
+      border-bottom: 1px solid var(--border-color);
+      padding: 10px 8px;
+      vertical-align: top;
+    }
+    .table th {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted-color);
+    }
+    .table td code {
+      background: #f1f5f9;
+      padding: 2px 6px;
+      border-radius: 6px;
+      display: inline-block;
+      font-size: 12px;
+    }
+    .entry-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .entry-actions button {
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+    .muted {
+      color: var(--muted-color);
+      font-size: 12px;
+    }
+    .empty {
+      border: 1px dashed var(--border-color);
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+      color: var(--muted-color);
+      font-size: 14px;
+      background: #f8fafc;
+    }
+    @media (max-width: 960px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>Status Admin</h1>
+  <p>Manage calendar sources, work hours, and access codes for each person. Entries are stored locally in this browser.</p>
+
+  <div class="layout">
+    <section class="panel">
+      <h2 id="form-title">Add person</h2>
+      <form id="entry-form">
+        <div class="field">
+          <label for="ics-url">ICS URL</label>
+          <input id="ics-url" name="icsUrl" type="url" placeholder="https://calendar.example.com/ics" required />
+        </div>
+        <div class="field">
+          <label for="display-name">Display name</label>
+          <input id="display-name" name="displayName" type="text" placeholder="Jordan Lee" required />
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="work-hours-start">Work hours start</label>
+            <input id="work-hours-start" name="workHoursStart" type="time" required />
+          </div>
+          <div class="field">
+            <label for="work-hours-end">Work hours end</label>
+            <input id="work-hours-end" name="workHoursEnd" type="time" required />
+          </div>
+        </div>
+        <div class="field">
+          <label for="work-hour-days">Work hour days list</label>
+          <input id="work-hour-days" name="workHourDaysList" type="text" placeholder="Mon, Tue, Wed, Thu, Fri" required />
+          <div class="muted">Use comma-separated days (e.g., Mon, Tue, Wed).</div>
+        </div>
+        <div class="actions">
+          <button class="primary" type="submit" id="save-button">Add person</button>
+          <button class="ghost" type="button" id="cancel-edit" hidden>Cancel edit</button>
+        </div>
+        <div class="muted" id="auth-preview"></div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>People</h2>
+      <div class="muted" id="entry-count"></div>
+      <div id="entries-container"></div>
+    </section>
+  </div>
+
+  <script>
+    const storageKey = "status-admin-entries";
+    const form = document.getElementById("entry-form");
+    const formTitle = document.getElementById("form-title");
+    const saveButton = document.getElementById("save-button");
+    const cancelEdit = document.getElementById("cancel-edit");
+    const entriesContainer = document.getElementById("entries-container");
+    const entryCount = document.getElementById("entry-count");
+    const authPreview = document.getElementById("auth-preview");
+
+    const fields = {
+      icsUrl: document.getElementById("ics-url"),
+      displayName: document.getElementById("display-name"),
+      workHoursStart: document.getElementById("work-hours-start"),
+      workHoursEnd: document.getElementById("work-hours-end"),
+      workHourDaysList: document.getElementById("work-hour-days"),
+    };
+
+    let entries = [];
+    let editingId = null;
+
+    function loadEntries() {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        entries = raw ? JSON.parse(raw) : [];
+      } catch (error) {
+        entries = [];
+      }
+    }
+
+    function saveEntries() {
+      localStorage.setItem(storageKey, JSON.stringify(entries));
+      renderEntries();
+    }
+
+    function randomAuthCode(length = 10) {
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      const values = new Uint32Array(length);
+      if (window.crypto && window.crypto.getRandomValues) {
+        window.crypto.getRandomValues(values);
+      } else {
+        for (let i = 0; i < length; i += 1) {
+          values[i] = Math.floor(Math.random() * chars.length);
+        }
+      }
+      return Array.from(values, (value) => chars[value % chars.length]).join("");
+    }
+
+    function resetForm() {
+      form.reset();
+      editingId = null;
+      formTitle.textContent = "Add person";
+      saveButton.textContent = "Add person";
+      cancelEdit.hidden = true;
+      authPreview.textContent = "";
+    }
+
+    function populateForm(entry) {
+      fields.icsUrl.value = entry.ics_url;
+      fields.displayName.value = entry.display_name;
+      fields.workHoursStart.value = entry.work_hours_start;
+      fields.workHoursEnd.value = entry.work_hours_end;
+      fields.workHourDaysList.value = entry.work_hour_days_list;
+      formTitle.textContent = "Edit person";
+      saveButton.textContent = "Save changes";
+      cancelEdit.hidden = false;
+      authPreview.textContent = `Auth code: ${entry.auth_code}`;
+    }
+
+    function renderEntries() {
+      entryCount.textContent = `${entries.length} entr${entries.length === 1 ? "y" : "ies"}`;
+      if (!entries.length) {
+        entriesContainer.innerHTML = '<div class="empty">No people added yet.</div>';
+        return;
+      }
+      const tableRows = entries
+        .map((entry) => `
+          <tr>
+            <td><strong>${entry.display_name}</strong><br /><span class="muted">${entry.ics_url}</span></td>
+            <td>${entry.work_hours_start} - ${entry.work_hours_end}<br /><span class="muted">${entry.work_hour_days_list}</span></td>
+            <td><code>${entry.auth_code}</code></td>
+            <td>
+              <div class="entry-actions">
+                <button class="ghost" data-action="edit" data-id="${entry.id}">Edit</button>
+                <button class="danger" data-action="delete" data-id="${entry.id}">Remove</button>
+              </div>
+            </td>
+          </tr>
+        `)
+        .join("");
+      entriesContainer.innerHTML = `
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Person</th>
+              <th>Work hours</th>
+              <th>Auth code</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+      `;
+    }
+
+    function handleSubmit(event) {
+      event.preventDefault();
+      const entryData = {
+        ics_url: fields.icsUrl.value.trim(),
+        display_name: fields.displayName.value.trim(),
+        work_hours_start: fields.workHoursStart.value,
+        work_hours_end: fields.workHoursEnd.value,
+        work_hour_days_list: fields.workHourDaysList.value.trim(),
+      };
+      if (editingId) {
+        entries = entries.map((entry) =>
+          entry.id === editingId ? { ...entry, ...entryData } : entry
+        );
+      } else {
+        const authCode = randomAuthCode();
+        entries.push({
+          id: crypto.randomUUID ? crypto.randomUUID() : `entry-${Date.now()}`,
+          ...entryData,
+          auth_code: authCode,
+          created_at: new Date().toISOString(),
+        });
+      }
+      saveEntries();
+      resetForm();
+    }
+
+    function handleTableClick(event) {
+      const button = event.target.closest("button[data-action]");
+      if (!button) {
+        return;
+      }
+      const { action, id } = button.dataset;
+      const entry = entries.find((item) => item.id === id);
+      if (!entry) {
+        return;
+      }
+      if (action === "edit") {
+        editingId = id;
+        populateForm(entry);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      } else if (action === "delete") {
+        if (!window.confirm(`Remove ${entry.display_name}?`)) {
+          return;
+        }
+        entries = entries.filter((item) => item.id !== id);
+        saveEntries();
+        if (editingId === id) {
+          resetForm();
+        }
+      }
+    }
+
+    form.addEventListener("submit", handleSubmit);
+    cancelEdit.addEventListener("click", resetForm);
+    entriesContainer.addEventListener("click", handleTableClick);
+
+    loadEntries();
+    renderEntries();
+  </script>
+</body>
+</html>
