@@ -272,6 +272,18 @@ Both services read from a runtime directory (default `/home/pi/status-screen`). 
 it, set `STATUS_SCREEN_DIR` in the systemd service or environment file before starting the
 services.
 
+### Admin page access
+
+To protect the admin page (`/admin.html`) set an admin password in the runtime `.env`
+file:
+
+```bash
+ADMIN_PASSWORD="your-strong-password"
+```
+
+The admin UI hashes the password and compares it to a hash served by the status service.
+If `ADMIN_PASSWORD` is unset, the admin page remains open.
+
 ### Logging and polling overrides
 
 You can tune logging verbosity and polling cadence via `.env`:

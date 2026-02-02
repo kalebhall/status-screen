@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 from datetime import datetime, timedelta, timezone
@@ -21,6 +22,8 @@ def load_dotenv(dotenv_path: str):
             os.environ.setdefault(k, v)
 
 load_dotenv(os.path.join(RUNTIME_DIR, ".env"))
+
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "").strip()
 
 def parse_env_list(key: str) -> list[str]:
     raw = os.environ.get(key, "").strip()
@@ -287,6 +290,13 @@ def api_clear():
 @app.get("/api/health")
 def api_health():
     return jsonify({"ok": True})
+
+@app.get("/api/admin-config")
+def api_admin_config():
+    if not ADMIN_PASSWORD:
+        return jsonify({"enabled": False})
+    digest = hashlib.sha256(ADMIN_PASSWORD.encode("utf-8")).hexdigest()
+    return jsonify({"enabled": True, "password_hash": digest})
 
 @app.route("/api/people", methods=["GET", "POST", "OPTIONS"])
 def api_people():

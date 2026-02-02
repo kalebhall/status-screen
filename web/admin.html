@@ -205,6 +205,17 @@
       font-size: 14px;
       background: #f8fafc;
     }
+    #app[hidden],
+    #auth-panel[hidden] {
+      display: none;
+    }
+    #auth-panel {
+      max-width: 420px;
+      margin-bottom: 24px;
+    }
+    #auth-panel .actions {
+      justify-content: flex-start;
+    }
     @media (max-width: 960px) {
       .layout {
         grid-template-columns: 1fr;
@@ -216,7 +227,22 @@
   <h1>Status Admin</h1>
   <p>Manage calendar sources, work hours, and access codes for each person. Entries are stored on the status screen service.</p>
 
-  <div class="layout">
+  <section class="panel" id="auth-panel" hidden>
+    <h2>Admin access</h2>
+    <p>Enter the admin password to manage people.</p>
+    <form id="auth-form">
+      <div class="field">
+        <label for="admin-password">Admin password</label>
+        <input id="admin-password" name="adminPassword" type="password" autocomplete="current-password" required />
+      </div>
+      <div class="actions">
+        <button class="primary" type="submit">Unlock</button>
+      </div>
+      <div class="muted" id="auth-message"></div>
+    </form>
+  </section>
+
+  <div class="layout" id="app" hidden>
     <section class="panel">
       <h2 id="form-title">Add person</h2>
       <form id="entry-form">
@@ -263,6 +289,11 @@
     const apiBase = window.location.port && window.location.port !== "5000"
       ? `${window.location.protocol}//${window.location.hostname}:5000`
       : window.location.origin;
+    const app = document.getElementById("app");
+    const authPanel = document.getElementById("auth-panel");
+    const authForm = document.getElementById("auth-form");
+    const authInput = document.getElementById("admin-password");
+    const authMessage = document.getElementById("auth-message");
     const form = document.getElementById("entry-form");
     const formTitle = document.getElementById("form-title");
     const saveButton = document.getElementById("save-button");
@@ -282,6 +313,12 @@
     let entries = [];
     let editingId = null;
     let draggingId = null;
+    let adminPasswordHash = "";
+
+    function setAuthState(isAuthed) {
+      app.hidden = !isAuthed;
+      authPanel.hidden = isAuthed;
+    }
 
     async function loadEntries() {
       try {
@@ -535,10 +572,48 @@
     entriesContainer.addEventListener("dragover", handleDragOver);
     entriesContainer.addEventListener("drop", handleDrop);
     entriesContainer.addEventListener("dragend", handleDragEnd);
+    function hashPassword(value) {
+      const data = new TextEncoder().encode(value);
+      return window.crypto.subtle.digest("SHA-256", data).then((buffer) =>
+        Array.from(new Uint8Array(buffer))
+          .map((byte) => byte.toString(16).padStart(2, "0"))
+          .join("")
+      );
+    }
+
+    authForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const nextPassword = authInput.value.trim();
+      try {
+        const hashed = await hashPassword(nextPassword);
+        if (hashed !== adminPasswordHash) {
+          throw new Error("Unauthorized");
+        }
+        await loadEntries();
+        renderEntries();
+        authMessage.textContent = "";
+        setAuthState(true);
+      } catch (error) {
+        authMessage.textContent = "Incorrect password. Please try again.";
+        setAuthState(false);
+      }
+    });
 
     async function init() {
-      await loadEntries();
-      renderEntries();
+      try {
+        const response = await fetch(`${apiBase}/api/admin-config`);
+        const payload = await response.json();
+        if (!payload.enabled) {
+          await loadEntries();
+          renderEntries();
+          setAuthState(true);
+          return;
+        }
+        adminPasswordHash = payload.password_hash || "";
+        setAuthState(false);
+      } catch (error) {
+        setAuthState(false);
+      }
     }
 
     init();
