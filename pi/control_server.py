@@ -8,6 +8,22 @@ RUNTIME_DIR = os.environ.get("STATUS_SCREEN_DIR", "/home/pi/status-screen")
 OVERRIDE_JSON_PATH = os.path.join(RUNTIME_DIR, "override.json")
 PEOPLE_JSON_PATH = os.path.join(RUNTIME_DIR, "people.json")
 
+def parse_env_value(raw: str) -> str:
+    value = raw.strip()
+    if not value:
+        return ""
+    if value[0] in ("\"", "'"):
+        quote = value[0]
+        end_index = value.find(quote, 1)
+        if end_index != -1:
+            return value[1:end_index]
+        return value[1:]
+    for index, char in enumerate(value):
+        if char == "#" and (index == 0 or value[index - 1].isspace()):
+            value = value[:index]
+            break
+    return value.strip()
+
 def load_dotenv(dotenv_path: str):
     if not os.path.exists(dotenv_path):
         return
@@ -18,7 +34,7 @@ def load_dotenv(dotenv_path: str):
                 continue
             k, v = line.split("=", 1)
             k = k.strip()
-            v = v.strip().strip('"').strip("'")
+            v = parse_env_value(v)
             os.environ.setdefault(k, v)
 
 load_dotenv(os.path.join(RUNTIME_DIR, ".env"))
