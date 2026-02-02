@@ -156,6 +156,34 @@
       display: inline-block;
       font-size: 12px;
     }
+    .drag-cell {
+      width: 40px;
+    }
+    .drag-handle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      cursor: grab;
+      color: var(--muted-color);
+      font-size: 16px;
+      user-select: none;
+    }
+    .drag-handle:active {
+      cursor: grabbing;
+    }
+    tr.dragging {
+      opacity: 0.6;
+    }
+    tr.drop-before td {
+      border-top: 2px solid var(--accent);
+    }
+    tr.drop-after td {
+      border-bottom: 2px solid var(--accent);
+    }
     .entry-actions {
       display: flex;
       gap: 8px;
@@ -186,7 +214,7 @@
 </head>
 <body>
   <h1>Status Admin</h1>
-  <p>Manage calendar sources, work hours, and access codes for each person. Entries are stored locally in this browser.</p>
+  <p>Manage calendar sources, work hours, and access codes for each person. Entries are stored on the status screen service.</p>
 
   <div class="layout">
     <section class="panel">
@@ -232,6 +260,9 @@
 
   <script>
     const storageKey = "status-admin-entries";
+    const apiBase = window.location.port && window.location.port !== "5000"
+      ? `${window.location.protocol}//${window.location.hostname}:5000`
+      : window.location.origin;
     const form = document.getElementById("entry-form");
     const formTitle = document.getElementById("form-title");
     const saveButton = document.getElementById("save-button");
@@ -250,18 +281,44 @@
 
     let entries = [];
     let editingId = null;
+    let draggingId = null;
 
-    function loadEntries() {
+    async function loadEntries() {
       try {
-        const raw = localStorage.getItem(storageKey);
-        entries = raw ? JSON.parse(raw) : [];
+        const response = await fetch(`${apiBase}/api/people`);
+        if (!response.ok) {
+          throw new Error("Failed to load people list");
+        }
+        const payload = await response.json();
+        if (Array.isArray(payload)) {
+          entries = payload;
+        } else if (Array.isArray(payload.people)) {
+          entries = payload.people;
+        } else {
+          entries = [];
+        }
+        localStorage.setItem(storageKey, JSON.stringify(entries));
       } catch (error) {
-        entries = [];
+        try {
+          const raw = localStorage.getItem(storageKey);
+          entries = raw ? JSON.parse(raw) : [];
+        } catch (err) {
+          entries = [];
+        }
       }
     }
 
-    function saveEntries() {
+    async function saveEntries() {
       localStorage.setItem(storageKey, JSON.stringify(entries));
+      try {
+        await fetch(`${apiBase}/api/people`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ people: entries }),
+        });
+      } catch (error) {
+        console.warn("Failed to save people to service.", error);
+      }
       renderEntries();
     }
 
@@ -307,7 +364,8 @@
       }
       const tableRows = entries
         .map((entry) => `
-          <tr>
+          <tr data-id="${entry.id}">
+            <td class="drag-cell"><span class="drag-handle" title="Drag to reorder" aria-label="Drag to reorder" draggable="true">⋮⋮</span></td>
             <td><strong>${entry.display_name}</strong><br /><span class="muted">${entry.ics_url}</span></td>
             <td>${entry.work_hours_start} - ${entry.work_hours_end}<br /><span class="muted">${entry.work_hour_days_list}</span></td>
             <td><code>${entry.auth_code}</code></td>
@@ -324,6 +382,7 @@
         <table class="table">
           <thead>
             <tr>
+              <th></th>
               <th>Person</th>
               <th>Work hours</th>
               <th>Auth code</th>
@@ -389,12 +448,100 @@
       }
     }
 
+    function clearDragClasses() {
+      entriesContainer.querySelectorAll("tr").forEach((row) => {
+        row.classList.remove("dragging", "drop-before", "drop-after");
+      });
+    }
+
+    function handleDragStart(event) {
+      const handle = event.target.closest(".drag-handle");
+      if (!handle) {
+        return;
+      }
+      const row = handle.closest("tr[data-id]");
+      if (!row) {
+        return;
+      }
+      draggingId = row.dataset.id;
+      clearDragClasses();
+      row.classList.add("dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", draggingId);
+    }
+
+    function handleDragOver(event) {
+      if (!draggingId) {
+        return;
+      }
+      const row = event.target.closest("tr[data-id]");
+      if (!row || row.dataset.id === draggingId) {
+        return;
+      }
+      event.preventDefault();
+      clearDragClasses();
+      const rect = row.getBoundingClientRect();
+      const before = event.clientY - rect.top < rect.height / 2;
+      row.classList.toggle("drop-before", before);
+      row.classList.toggle("drop-after", !before);
+    }
+
+    function handleDrop(event) {
+      if (!draggingId) {
+        return;
+      }
+      const row = event.target.closest("tr[data-id]");
+      if (!row) {
+        return;
+      }
+      event.preventDefault();
+      const targetId = row.dataset.id;
+      if (targetId === draggingId) {
+        clearDragClasses();
+        draggingId = null;
+        return;
+      }
+      const draggedIndex = entries.findIndex((entry) => entry.id === draggingId);
+      const targetIndex = entries.findIndex((entry) => entry.id === targetId);
+      if (draggedIndex === -1 || targetIndex === -1) {
+        clearDragClasses();
+        draggingId = null;
+        return;
+      }
+      const rect = row.getBoundingClientRect();
+      const before = event.clientY - rect.top < rect.height / 2;
+      const [moved] = entries.splice(draggedIndex, 1);
+      let insertIndex = targetIndex;
+      if (draggedIndex < targetIndex && before) {
+        insertIndex = targetIndex - 1;
+      } else if (draggedIndex > targetIndex && !before) {
+        insertIndex = targetIndex + 1;
+      }
+      entries.splice(insertIndex, 0, moved);
+      clearDragClasses();
+      draggingId = null;
+      saveEntries();
+    }
+
+    function handleDragEnd() {
+      clearDragClasses();
+      draggingId = null;
+    }
+
     form.addEventListener("submit", handleSubmit);
     cancelEdit.addEventListener("click", resetForm);
     entriesContainer.addEventListener("click", handleTableClick);
+    entriesContainer.addEventListener("dragstart", handleDragStart);
+    entriesContainer.addEventListener("dragover", handleDragOver);
+    entriesContainer.addEventListener("drop", handleDrop);
+    entriesContainer.addEventListener("dragend", handleDragEnd);
 
-    loadEntries();
-    renderEntries();
+    async function init() {
+      await loadEntries();
+      renderEntries();
+    }
+
+    init();
   </script>
 </body>
 </html>
