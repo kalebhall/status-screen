@@ -218,13 +218,17 @@
       return people.length || 1;
     }
 
-    function resolveSelectedPerson() {
+    function resolveSelectedPeople() {
       const params = new URLSearchParams(window.location.search);
-      const name = params.get("person");
-      if (!name) {
+      const values = params.getAll("person");
+      if (!values.length) {
         return null;
       }
-      return name.trim().toLowerCase() || null;
+      const names = values
+        .flatMap((value) => value.split(","))
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean);
+      return names.length ? names : null;
     }
 
     function setRowCount(count, maxPerColumn) {
@@ -402,17 +406,17 @@
         return;
       }
       const people = Array.isArray(data.people) ? data.people : [data];
-      const selectedPerson = resolveSelectedPerson();
-      const filteredPeople = selectedPerson
-        ? people.filter((person) => (person.name || "").toLowerCase() === selectedPerson)
+      const selectedPeople = resolveSelectedPeople();
+      const filteredPeople = selectedPeople
+        ? people.filter((person) => selectedPeople.includes((person.name || "").toLowerCase()))
         : people;
       applyDisplayMode(resolveDisplayMode(data, filteredPeople));
-      if (selectedPerson && filteredPeople.length === 0) {
+      if (selectedPeople && filteredPeople.length === 0) {
         setRowCount(1, 1);
         updateRow(0, {
           state: "error",
           label: "NOT FOUND",
-          detail: `No match for "${selectedPerson}".`,
+          detail: `No match for "${selectedPeople.join(", ")}".`,
           name: "Unavailable",
         });
         return;
