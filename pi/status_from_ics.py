@@ -10,6 +10,7 @@ RUNTIME_DIR = os.environ.get("STATUS_SCREEN_DIR", "/home/pi/status-screen")
 
 STATUS_JSON_PATH = os.path.join(RUNTIME_DIR, "status.json")
 OVERRIDE_JSON_PATH = os.path.join(RUNTIME_DIR, "override.json")
+PEOPLE_JSON_PATH = os.path.join(RUNTIME_DIR, "people.json")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -125,15 +126,43 @@ def parse_env_list(key: str) -> list[str]:
         pass
     return [item.strip() for item in raw.split(",") if item.strip()]
 
-def build_groups() -> list[dict]:
-    ics_urls = parse_env_list("ICS_URLS")
-    display_names = parse_env_list("DISPLAY_NAMES")
-    auth_tokens = parse_env_list("AUTH_TOKENS")
-    work_hour_starts = parse_env_list("WORK_HOURS_STARTS")
-    work_hour_ends = parse_env_list("WORK_HOURS_ENDS")
-    work_hour_days = parse_env_list("WORK_HOURS_DAYS_LIST")
+def load_people_config() -> list[dict]:
+    if not os.path.exists(PEOPLE_JSON_PATH):
+        return []
+    try:
+        with open(PEOPLE_JSON_PATH, "r") as f:
+            payload = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return []
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        people = payload.get("people")
+        if isinstance(people, list):
+            return [item for item in people if isinstance(item, dict)]
+    return []
 
-    group_count = len(ics_urls) if ics_urls else 1
+def person_auth_code(entry: dict) -> str:
+    return (entry.get("auth_code") or entry.get("auth_token") or "").strip()
+
+def build_groups() -> list[dict]:
+    people = load_people_config()
+    if people:
+        ics_urls = [entry.get("ics_url", "").strip() for entry in people]
+        display_names = [entry.get("display_name", "").strip() for entry in people]
+        auth_tokens = [person_auth_code(entry) for entry in people]
+        work_hour_starts = [entry.get("work_hours_start", "").strip() for entry in people]
+        work_hour_ends = [entry.get("work_hours_end", "").strip() for entry in people]
+        work_hour_days = [entry.get("work_hour_days_list", "").strip() for entry in people]
+        group_count = len(people)
+    else:
+        ics_urls = parse_env_list("ICS_URLS")
+        display_names = parse_env_list("DISPLAY_NAMES")
+        auth_tokens = parse_env_list("AUTH_TOKENS")
+        work_hour_starts = parse_env_list("WORK_HOURS_STARTS")
+        work_hour_ends = parse_env_list("WORK_HOURS_ENDS")
+        work_hour_days = parse_env_list("WORK_HOURS_DAYS_LIST")
+        group_count = len(ics_urls) if ics_urls else 1
     if len(display_names) > group_count or len(auth_tokens) > group_count:
         logging.warning(
             "Extra DISPLAY_NAMES/AUTH_TOKENS provided; only the first %s entries will be used.",
@@ -161,9 +190,15 @@ def build_groups() -> list[dict]:
             suffix = f"-{index + 1}{name_suffix}"
             cache_path = f"{cache_root}{suffix}{cache_ext}" if cache_ext else f"{base_cache}{suffix}"
             override_path = os.path.join(RUNTIME_DIR, f"override-{index + 1}.json")
-        start_value = work_hour_starts[index] if index < len(work_hour_starts) else WORK_HOURS_START
-        end_value = work_hour_ends[index] if index < len(work_hour_ends) else WORK_HOURS_END
-        days_value = work_hour_days[index] if index < len(work_hour_days) else WORK_HOURS_DAYS
+        start_value = work_hour_starts[index] if index < len(work_hour_starts) else ""
+        end_value = work_hour_ends[index] if index < len(work_hour_ends) else ""
+        days_value = work_hour_days[index] if index < len(work_hour_days) else ""
+        if not start_value:
+            start_value = WORK_HOURS_START
+        if not end_value:
+            end_value = WORK_HOURS_END
+        if not days_value:
+            days_value = WORK_HOURS_DAYS
         groups.append(
             {
                 "index": index,

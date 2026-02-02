@@ -5,6 +5,7 @@ from flask import Flask, request, jsonify, Response
 
 RUNTIME_DIR = os.environ.get("STATUS_SCREEN_DIR", "/home/pi/status-screen")
 OVERRIDE_JSON_PATH = os.path.join(RUNTIME_DIR, "override.json")
+PEOPLE_JSON_PATH = os.path.join(RUNTIME_DIR, "people.json")
 
 def load_dotenv(dotenv_path: str):
     if not os.path.exists(dotenv_path):
@@ -33,41 +34,101 @@ def parse_env_list(key: str) -> list[str]:
         pass
     return [item.strip() for item in raw.split(",") if item.strip()]
 
-AUTH_TOKENS = parse_env_list("AUTH_TOKENS")
-ICS_URLS = parse_env_list("ICS_URLS")
-DISPLAY_NAMES = parse_env_list("DISPLAY_NAMES")
-GROUP_COUNT = len(ICS_URLS) if ICS_URLS else 1
+def load_people_config() -> list[dict]:
+    if not os.path.exists(PEOPLE_JSON_PATH):
+        return []
+    try:
+        with open(PEOPLE_JSON_PATH, "r") as f:
+            payload = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return []
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        people = payload.get("people")
+        if isinstance(people, list):
+            return [item for item in people if isinstance(item, dict)]
+    return []
+
+def build_people_from_env() -> list[dict]:
+    ics_urls = parse_env_list("ICS_URLS")
+    display_names = parse_env_list("DISPLAY_NAMES")
+    auth_tokens = parse_env_list("AUTH_TOKENS")
+    work_hour_starts = parse_env_list("WORK_HOURS_STARTS")
+    work_hour_ends = parse_env_list("WORK_HOURS_ENDS")
+    work_hour_days = parse_env_list("WORK_HOURS_DAYS_LIST")
+    if not any(
+        [ics_urls, display_names, auth_tokens, work_hour_starts, work_hour_ends, work_hour_days]
+    ):
+        return []
+    group_count = len(ics_urls) if ics_urls else 1
+    people = []
+    for index in range(group_count):
+        people.append(
+            {
+                "ics_url": ics_urls[index] if index < len(ics_urls) else "",
+                "display_name": display_names[index] if index < len(display_names) else "",
+                "auth_code": auth_tokens[index] if index < len(auth_tokens) else "",
+                "work_hours_start": work_hour_starts[index] if index < len(work_hour_starts) else "",
+                "work_hours_end": work_hour_ends[index] if index < len(work_hour_ends) else "",
+                "work_hour_days_list": work_hour_days[index] if index < len(work_hour_days) else "",
+            }
+        )
+    return people
+
+def get_people_config() -> list[dict]:
+    people = load_people_config()
+    if people:
+        return people
+    return build_people_from_env()
+
+def person_auth_code(entry: dict) -> str:
+    return (entry.get("auth_code") or entry.get("auth_token") or "").strip()
 
 app = Flask(__name__)
+
+def add_people_cors_headers(response: Response) -> Response:
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    return response
 
 def now_utc():
     return datetime.now(timezone.utc)
 
 def resolve_token_index(req) -> int | None:
+    people = get_people_config()
+    auth_tokens = [person_auth_code(entry) for entry in people]
     token = req.headers.get("X-Auth-Token", "")
     if not token:
         return None
     try:
-        return AUTH_TOKENS.index(token)
+        return auth_tokens.index(token)
     except ValueError:
         return None
 
 def group_display_names() -> list[str]:
+    people = get_people_config()
+    group_count = len(people) if people else 1
     return [
-        DISPLAY_NAMES[index] if index < len(DISPLAY_NAMES) else f"Group {index + 1}"
-        for index in range(GROUP_COUNT)
+        (people[index].get("display_name") if index < len(people) else "")
+        or f"Group {index + 1}"
+        for index in range(group_count)
     ]
 
 def override_path_for(index: int) -> str:
-    if GROUP_COUNT <= 1:
+    group_count = len(get_people_config()) or 1
+    if group_count <= 1:
         return OVERRIDE_JSON_PATH
     return os.path.join(RUNTIME_DIR, f"override-{index + 1}.json")
 
 def resolve_group_index(token_index: int, data: dict) -> int:
-    if GROUP_COUNT <= 1:
+    group_count = len(get_people_config()) or 1
+    if group_count <= 1:
         return 0
-    if len(AUTH_TOKENS) > 1:
-        return min(token_index, GROUP_COUNT - 1)
+    auth_tokens = [person_auth_code(entry) for entry in get_people_config()]
+    if len(auth_tokens) > 1:
+        return min(token_index, group_count - 1)
     requested = data.get("group_index", data.get("group"))
     if requested is None:
         return 0
@@ -75,7 +136,7 @@ def resolve_group_index(token_index: int, data: dict) -> int:
         requested_index = int(requested)
     except (TypeError, ValueError):
         return 0
-    if 0 <= requested_index < GROUP_COUNT:
+    if 0 <= requested_index < group_count:
         return requested_index
     return 0
 
@@ -106,8 +167,9 @@ def control_page():
         f'<option value="{index}">{name}</option>'
         for index, name in enumerate(group_display_names())
     )
+    group_count = len(get_people_config()) or 1
     group_selector = ""
-    if GROUP_COUNT > 1:
+    if group_count > 1:
         group_selector = f"""
   <div class="row">
     <label>Person: </label>
@@ -225,6 +287,35 @@ def api_clear():
 @app.get("/api/health")
 def api_health():
     return jsonify({"ok": True})
+
+@app.route("/api/people", methods=["GET", "POST", "OPTIONS"])
+def api_people():
+    if request.method == "OPTIONS":
+        return add_people_cors_headers(Response(status=204))
+    if request.method == "GET":
+        people = get_people_config()
+        response = jsonify({"people": people})
+        return add_people_cors_headers(response)
+    data = request.get_json(force=True, silent=True)
+    if isinstance(data, dict):
+        people = data.get("people", [])
+    else:
+        people = data
+    if not isinstance(people, list):
+        response = jsonify({"error": "invalid payload"})
+        return add_people_cors_headers(response), 400
+    cleaned = [entry for entry in people if isinstance(entry, dict)]
+    payload = {
+        "people": cleaned,
+        "updated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+    }
+    os.makedirs(os.path.dirname(PEOPLE_JSON_PATH), exist_ok=True)
+    tmp = PEOPLE_JSON_PATH + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(payload, f)
+    os.replace(tmp, PEOPLE_JSON_PATH)
+    response = jsonify(payload)
+    return add_people_cors_headers(response)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
