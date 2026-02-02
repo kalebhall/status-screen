@@ -39,7 +39,7 @@ def load_dotenv(dotenv_path: str):
 
 load_dotenv(os.path.join(RUNTIME_DIR, ".env"))
 
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "").strip()
+ADMIN_PASSWORD = parse_env_value(os.environ.get("ADMIN_PASSWORD", ""))
 
 def parse_env_list(key: str) -> list[str]:
     raw = os.environ.get(key, "").strip()
