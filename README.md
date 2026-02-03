@@ -137,6 +137,15 @@ EPAPER_MODEL="7.5in-b"
 EPAPER_UPDATE_SECONDS="300"
 ```
 
+If you are using a different driver package (for example, a Raspberry Pi 5-compatible
+library), you can override the module and color mode directly:
+
+```bash
+EPAPER_ENABLED="true"
+EPAPER_DRIVER_MODULE="waveshare_epd_lg.epd7in5b_V2"
+EPAPER_COLOR_MODE="bicolor"
+```
+
 ## Column wrapping
 
 Control how many people appear in a column before the UI wraps into a new column:
