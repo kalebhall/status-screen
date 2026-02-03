@@ -118,6 +118,8 @@ ROWS_PER_COLUMN = parse_env_positive_int("ROWS_PER_COLUMN")
 EPAPER_ENABLED = parse_env_bool("EPAPER_ENABLED", False)
 EPAPER_MODEL = os.environ.get("EPAPER_MODEL", "").strip().lower()
 EPAPER_UPDATE_SECONDS = parse_env_positive_int("EPAPER_UPDATE_SECONDS")
+EPAPER_DRIVER_MODULE = os.environ.get("EPAPER_DRIVER_MODULE", "").strip()
+EPAPER_COLOR_MODE = os.environ.get("EPAPER_COLOR_MODE", "").strip().lower()
 
 def parse_env_list(key: str) -> list[str]:
     raw = os.environ.get(key, "").strip()
@@ -157,9 +159,25 @@ def epaper_signature(payload: dict) -> tuple:
 def load_epaper_driver() -> tuple[object, str] | None:
     if not EPAPER_ENABLED:
         return None
-    if not EPAPER_MODEL:
-        logging.warning("EPAPER_ENABLED is true but EPAPER_MODEL is empty.")
+    if not EPAPER_MODEL and not EPAPER_DRIVER_MODULE:
+        logging.warning(
+            "EPAPER_ENABLED is true but EPAPER_MODEL/EPAPER_DRIVER_MODULE is empty."
+        )
         return None
+    if EPAPER_DRIVER_MODULE:
+        color_mode = EPAPER_COLOR_MODE or "mono"
+        module = import_optional_module(EPAPER_DRIVER_MODULE)
+        if module is None:
+            logging.warning(
+                "Missing e-paper module %s. Check EPAPER_DRIVER_MODULE.",
+                EPAPER_DRIVER_MODULE,
+            )
+            return None
+        epd = module.EPD()
+        epd.init()
+        if hasattr(epd, "Clear"):
+            epd.Clear()
+        return epd, color_mode
     model_map = {
         "7.5in-b": ("waveshare_epd.epd7in5b_V2", "bicolor"),
         "7in5b": ("waveshare_epd.epd7in5b_V2", "bicolor"),
