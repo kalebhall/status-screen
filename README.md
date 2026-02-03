@@ -122,6 +122,21 @@ status server, there is an ESP32-S3 sketch in `esp32/` that polls `/status.json`
 30 seconds and renders the status text on a black/white display. See
 `esp32/README.md` for wiring and library setup steps.
 
+## Waveshare SPI e-paper HATs
+
+The Raspberry Pi service can also push status updates directly to Waveshare SPI e-paper
+HATs. Supported models are the 9.7-inch HAT and the 7.5-inch (B) HAT (black/white/red).
+Install the Waveshare Python driver from their wiki, then set the environment options:
+
+```bash
+EPAPER_ENABLED="true"
+EPAPER_MODEL="9.7in"
+# or
+EPAPER_MODEL="7.5in-b"
+# Optional: throttle refreshes
+EPAPER_UPDATE_SECONDS="300"
+```
+
 ## Column wrapping
 
 Control how many people appear in a column before the UI wraps into a new column:
