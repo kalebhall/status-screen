@@ -1,5 +1,7 @@
+import importlib
 import json
 import logging
+import math
 import os
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -113,6 +115,9 @@ if DISPLAY_MODE_RAW not in DISPLAY_MODE_OPTIONS:
 else:
     DISPLAY_MODE = DISPLAY_MODE_RAW
 ROWS_PER_COLUMN = parse_env_positive_int("ROWS_PER_COLUMN")
+EPAPER_ENABLED = parse_env_bool("EPAPER_ENABLED", False)
+EPAPER_MODEL = os.environ.get("EPAPER_MODEL", "").strip().lower()
+EPAPER_UPDATE_SECONDS = parse_env_positive_int("EPAPER_UPDATE_SECONDS")
 
 def parse_env_list(key: str) -> list[str]:
     raw = os.environ.get(key, "").strip()
@@ -125,6 +130,149 @@ def parse_env_list(key: str) -> list[str]:
     except json.JSONDecodeError:
         pass
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+def import_optional_module(name: str):
+    if importlib.util.find_spec(name) is None:
+        return None
+    return importlib.import_module(name)
+
+def epaper_signature(payload: dict) -> tuple:
+    people = payload.get("people") or []
+    signature = []
+    for person in people:
+        signature.append(
+            (
+                person.get("name", ""),
+                person.get("state", ""),
+                person.get("label", ""),
+                person.get("detail", ""),
+                person.get("until", ""),
+                person.get("next_event_at", ""),
+            )
+        )
+    return tuple(signature)
+
+@lru_cache(maxsize=1)
+def load_epaper_driver() -> tuple[object, str] | None:
+    if not EPAPER_ENABLED:
+        return None
+    if not EPAPER_MODEL:
+        logging.warning("EPAPER_ENABLED is true but EPAPER_MODEL is empty.")
+        return None
+    model_map = {
+        "7.5in-b": ("waveshare_epd.epd7in5b_V2", "bicolor"),
+        "7in5b": ("waveshare_epd.epd7in5b_V2", "bicolor"),
+        "7in5b_v2": ("waveshare_epd.epd7in5b_V2", "bicolor"),
+        "7in5b-v2": ("waveshare_epd.epd7in5b_V2", "bicolor"),
+        "9.7in": ("waveshare_epd.epd9in7", "mono"),
+        "9in7": ("waveshare_epd.epd9in7", "mono"),
+    }
+    if EPAPER_MODEL not in model_map:
+        logging.warning("Unsupported EPAPER_MODEL=%s.", EPAPER_MODEL)
+        return None
+    module_name, color_mode = model_map[EPAPER_MODEL]
+    module = import_optional_module(module_name)
+    if module is None:
+        logging.warning("Missing Waveshare module %s. Install waveshare_epd first.", module_name)
+        return None
+    epd = module.EPD()
+    epd.init()
+    if hasattr(epd, "Clear"):
+        epd.Clear()
+    return epd, color_mode
+
+def load_epaper_font(size: int):
+    pil = import_optional_module("PIL")
+    if pil is None:
+        return None
+    ImageFont = importlib.import_module("PIL.ImageFont")
+    font_paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+    ]
+    for path in font_paths:
+        if os.path.exists(path):
+            return ImageFont.truetype(path, size=size)
+    return ImageFont.load_default()
+
+def render_epaper_image(payload: dict, width: int, height: int, color_mode: str):
+    pil = import_optional_module("PIL")
+    if pil is None:
+        logging.warning("Pillow is required for EPAPER output.")
+        return None, None
+    Image = importlib.import_module("PIL.Image")
+    ImageDraw = importlib.import_module("PIL.ImageDraw")
+    people = payload.get("people") or []
+    rows_per_column = payload.get("rows_per_column") or len(people) or 1
+    columns = max(1, math.ceil(len(people) / rows_per_column))
+    margin = 20
+    cell_width = max(1, (width - margin * 2) // columns)
+    cell_height = max(1, (height - margin * 2) // rows_per_column)
+
+    image = Image.new("1", (width, height), 255)
+    red_image = Image.new("1", (width, height), 255) if color_mode == "bicolor" else None
+    draw = ImageDraw.Draw(image)
+    draw_red = ImageDraw.Draw(red_image) if red_image else None
+
+    base_size = max(16, min(width, height) // 20)
+    font_title = load_epaper_font(base_size + 10)
+    font_label = load_epaper_font(base_size + 4)
+    font_detail = load_epaper_font(max(12, base_size - 2))
+
+    for index, person in enumerate(people):
+        col = index // rows_per_column
+        row = index % rows_per_column
+        x = margin + col * cell_width
+        y = margin + row * cell_height
+        box_right = x + cell_width - 10
+        box_bottom = y + cell_height - 10
+        draw.rectangle([x, y, box_right, box_bottom], outline=0)
+
+        name = person.get("name") or "Status"
+        label = person.get("label") or ""
+        detail = person.get("detail") or ""
+
+        draw.text((x + 12, y + 10), name, font=font_title, fill=0)
+        label_draw = draw
+        if draw_red and person.get("state") in {"ooo", "busy", "error"}:
+            label_draw = draw_red
+        label_draw.text((x + 12, y + 10 + base_size + 12), label, font=font_label, fill=0)
+
+        detail_y = y + 10 + base_size + 12 + base_size + 8
+        if detail:
+            draw.text((x + 12, detail_y), detail, font=font_detail, fill=0)
+        until = person.get("until")
+        if until:
+            draw.text((x + 12, detail_y + base_size + 6), f"Until {until}", font=font_detail, fill=0)
+
+    return image, red_image
+
+def update_epaper(payload: dict):
+    if not EPAPER_ENABLED:
+        return
+    driver = load_epaper_driver()
+    if driver is None:
+        return
+    epd, color_mode = driver
+    signature = epaper_signature(payload)
+    now = time.time()
+    last_update = getattr(update_epaper, "last_update", 0.0)
+    last_signature = getattr(update_epaper, "last_signature", None)
+    if signature == last_signature and EPAPER_UPDATE_SECONDS is None:
+        return
+    if EPAPER_UPDATE_SECONDS and now - last_update < EPAPER_UPDATE_SECONDS:
+        return
+    image, red_image = render_epaper_image(payload, epd.width, epd.height, color_mode)
+    if image is None:
+        return
+    if color_mode == "bicolor":
+        if red_image is None:
+            red_image = image
+        epd.display(epd.getbuffer(image), epd.getbuffer(red_image))
+    else:
+        epd.display(epd.getbuffer(image))
+    update_epaper.last_update = now
+    update_epaper.last_signature = signature
 
 def load_people_config() -> list[dict]:
     if not os.path.exists(PEOPLE_JSON_PATH):
@@ -964,6 +1112,7 @@ def main():
         with open(tmp, "w") as f:
             json.dump(payload, f)
         os.replace(tmp, STATUS_JSON_PATH)
+        update_epaper(payload)
     while True:
         current_mtime = get_people_config_mtime()
         if current_mtime != people_config_mtime:
@@ -986,6 +1135,7 @@ def main():
         with open(tmp, "w") as f:
             json.dump(payload, f)
         os.replace(tmp, STATUS_JSON_PATH)
+        update_epaper(payload)
         time.sleep(POLL_SECONDS)
 
 if __name__ == "__main__":
