@@ -132,9 +132,10 @@ def parse_env_list(key: str) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 def import_optional_module(name: str):
-    if importlib.util.find_spec(name) is None:
+    try:
+        return importlib.import_module(name)
+    except ImportError:
         return None
-    return importlib.import_module(name)
 
 def epaper_signature(payload: dict) -> tuple:
     people = payload.get("people") or []
