@@ -4,6 +4,7 @@ import logging
 import math
 import os
 import time
+import sys
 from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 
@@ -184,9 +185,10 @@ def load_epaper_driver() -> tuple[object, str] | None:
                 )
             if fallback_module is None:
                 logging.warning(
-                    "Missing e-paper module %s. %s",
+                    "Missing e-paper module %s. %s Python executable: %s.",
                     EPAPER_DRIVER_MODULE,
                     hint,
+                    sys.executable,
                 )
                 return None
             logging.warning(
