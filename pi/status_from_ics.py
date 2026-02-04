@@ -4,6 +4,7 @@ import logging
 import math
 import os
 import time
+import sys
 from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 
@@ -133,10 +134,12 @@ def parse_env_list(key: str) -> list[str]:
         pass
     return [item.strip() for item in raw.split(",") if item.strip()]
 
-def import_optional_module(name: str):
+def import_optional_module(name: str, log_error: bool = False):
     try:
         return importlib.import_module(name)
-    except ImportError:
+    except ImportError as exc:
+        if log_error:
+            logging.warning("Failed to import %s: %s", name, exc)
         return None
 
 def epaper_signature(payload: dict) -> tuple:
@@ -166,13 +169,36 @@ def load_epaper_driver() -> tuple[object, str] | None:
         return None
     if EPAPER_DRIVER_MODULE:
         color_mode = EPAPER_COLOR_MODE or "mono"
-        module = import_optional_module(EPAPER_DRIVER_MODULE)
+        module = import_optional_module(EPAPER_DRIVER_MODULE, log_error=True)
         if module is None:
+            fallback_module = None
+            fallback_name = None
+            if EPAPER_DRIVER_MODULE.startswith("waveshare_epd_lg."):
+                fallback_name = EPAPER_DRIVER_MODULE.replace("waveshare_epd_lg.", "waveshare_epd.", 1)
+                fallback_module = import_optional_module(fallback_name, log_error=True)
+                hint = (
+                    "Install the lgpio Waveshare driver and ensure PYTHONPATH includes it, "
+                    "or use the standard module name (e.g. waveshare_epd.epd7in5b_V2)."
+                )
+            else:
+                hint = (
+                    "Install the Waveshare driver and confirm the module path, "
+                    "for example waveshare_epd.epd7in5b_V2."
+                )
+            if fallback_module is None:
+                logging.warning(
+                    "Missing e-paper module %s. %s Python executable: %s.",
+                    EPAPER_DRIVER_MODULE,
+                    hint,
+                    sys.executable,
+                )
+                return None
             logging.warning(
-                "Missing e-paper module %s. Check EPAPER_DRIVER_MODULE.",
+                "Missing e-paper module %s; falling back to %s.",
                 EPAPER_DRIVER_MODULE,
+                fallback_name,
             )
-            return None
+            module = fallback_module
         epd = module.EPD()
         epd.init()
         if hasattr(epd, "Clear"):
@@ -190,7 +216,7 @@ def load_epaper_driver() -> tuple[object, str] | None:
         logging.warning("Unsupported EPAPER_MODEL=%s.", EPAPER_MODEL)
         return None
     module_name, color_mode = model_map[EPAPER_MODEL]
-    module = import_optional_module(module_name)
+    module = import_optional_module(module_name, log_error=True)
     if module is None:
         logging.warning("Missing Waveshare module %s. Install waveshare_epd first.", module_name)
         return None
