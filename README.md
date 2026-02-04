@@ -137,6 +137,38 @@ EPAPER_MODEL="7.5in-b"
 EPAPER_UPDATE_SECONDS="300"
 ```
 
+If you are using a different driver package (for example, a Raspberry Pi 5-compatible
+library), you can override the module and color mode directly:
+
+```bash
+EPAPER_ENABLED="true"
+EPAPER_DRIVER_MODULE="waveshare_epd_lg.epd7in5b_V2"
+EPAPER_COLOR_MODE="bicolor"
+```
+
+### Raspberry Pi 5 (lgpio) driver install
+
+For Raspberry Pi 5, install the lgpio-based Waveshare driver, then point the service at
+the lgpio module name:
+
+```bash
+sudo apt-get install -y python3-lgpio
+git clone https://github.com/waveshareteam/e-Paper.git
+python -m pip install ./e-Paper/RaspberryPi_JetsonNano/python
+```
+
+Use these module names for the supported panels:
+
+```bash
+# 7.5" (B) HAT
+EPAPER_DRIVER_MODULE="waveshare_epd_lg.epd7in5b_V2"
+EPAPER_COLOR_MODE="bicolor"
+
+# 9.7" HAT
+EPAPER_DRIVER_MODULE="waveshare_epd_lg.epd9in7"
+EPAPER_COLOR_MODE="mono"
+```
+
 ## Column wrapping
 
 Control how many people appear in a column before the UI wraps into a new column:
