@@ -4,6 +4,7 @@ import logging
 import math
 import os
 import time
+import sys
 from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 
@@ -168,11 +169,34 @@ def load_epaper_driver() -> tuple[object, str] | None:
         color_mode = EPAPER_COLOR_MODE or "mono"
         module = import_optional_module(EPAPER_DRIVER_MODULE)
         if module is None:
+            fallback_module = None
+            fallback_name = None
+            if EPAPER_DRIVER_MODULE.startswith("waveshare_epd_lg."):
+                fallback_name = EPAPER_DRIVER_MODULE.replace("waveshare_epd_lg.", "waveshare_epd.", 1)
+                fallback_module = import_optional_module(fallback_name)
+                hint = (
+                    "Install the lgpio Waveshare driver and ensure PYTHONPATH includes it, "
+                    "or use the standard module name (e.g. waveshare_epd.epd7in5b_V2)."
+                )
+            else:
+                hint = (
+                    "Install the Waveshare driver and confirm the module path, "
+                    "for example waveshare_epd.epd7in5b_V2."
+                )
+            if fallback_module is None:
+                logging.warning(
+                    "Missing e-paper module %s. %s Python executable: %s.",
+                    EPAPER_DRIVER_MODULE,
+                    hint,
+                    sys.executable,
+                )
+                return None
             logging.warning(
-                "Missing e-paper module %s. Check EPAPER_DRIVER_MODULE.",
+                "Missing e-paper module %s; falling back to %s.",
                 EPAPER_DRIVER_MODULE,
+                fallback_name,
             )
-            return None
+            module = fallback_module
         epd = module.EPD()
         epd.init()
         if hasattr(epd, "Clear"):
