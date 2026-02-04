@@ -168,9 +168,20 @@ def load_epaper_driver() -> tuple[object, str] | None:
         color_mode = EPAPER_COLOR_MODE or "mono"
         module = import_optional_module(EPAPER_DRIVER_MODULE)
         if module is None:
+            if EPAPER_DRIVER_MODULE.startswith("waveshare_epd_lg."):
+                hint = (
+                    "Install the lgpio Waveshare driver and ensure PYTHONPATH includes it, "
+                    "or use the standard module name (e.g. waveshare_epd.epd7in5b_V2)."
+                )
+            else:
+                hint = (
+                    "Install the Waveshare driver and confirm the module path, "
+                    "for example waveshare_epd.epd7in5b_V2."
+                )
             logging.warning(
-                "Missing e-paper module %s. Check EPAPER_DRIVER_MODULE.",
+                "Missing e-paper module %s. %s",
                 EPAPER_DRIVER_MODULE,
+                hint,
             )
             return None
         epd = module.EPD()
