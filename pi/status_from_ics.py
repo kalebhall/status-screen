@@ -100,6 +100,7 @@ WORK_HOURS_END = os.environ.get("WORK_HOURS_END", "")
 WORK_HOURS_DAYS = os.environ.get("WORK_HOURS_DAYS", "")
 
 OOO_KEYWORDS = ["out of office", "ooo", "vacation", "leave", "pto", "sick"]
+ELSEWHERE_KEYWORDS = ["working elsewhere", "another office", "other office"]
 IGNORE_KEYWORDS = ["cancelled", "canceled"]
 ALLDAY_ONLY_COUNTS_IF_OOO = parse_env_bool("ALLDAY_ONLY_COUNTS_IF_OOO", True)
 USE_MS_BUSY_STATUS = parse_env_bool("USE_MS_BUSY_STATUS", False)
@@ -705,6 +706,10 @@ def is_ooo(text: str) -> bool:
     t = (text or "").lower()
     return any(k in t for k in OOO_KEYWORDS)
 
+def is_elsewhere(text: str) -> bool:
+    t = (text or "").lower()
+    return any(k in t for k in ELSEWHERE_KEYWORDS)
+
 def should_ignore(text: str) -> bool:
     t = (text or "").lower()
     return any(k in t for k in IGNORE_KEYWORDS)
@@ -898,6 +903,8 @@ def microsoft_busy_status(event) -> str | None:
             return status
         if status in {"oof", "out of office", "outofoffice"}:
             return "ooo"
+        if status in {"workingelsewhere", "working elsewhere"}:
+            return "elsewhere"
         if status:
             return status
     return None
@@ -961,7 +968,8 @@ def current_calendar_event(ics_text: str) -> dict | None:
         if start_local <= now < end_local:
             busy_status = microsoft_busy_status(e) if USE_MS_BUSY_STATUS else None
             event_is_ooo = is_ooo(name) or busy_status == "ooo"
-            if ALLDAY_ONLY_COUNTS_IF_OOO and is_all_day_event(e) and not event_is_ooo:
+            event_is_elsewhere = is_elsewhere(name) or busy_status == "elsewhere"
+            if ALLDAY_ONLY_COUNTS_IF_OOO and is_all_day_event(e) and not (event_is_ooo or event_is_elsewhere):
                 continue
             if busy_status == "free":
                 continue
@@ -998,7 +1006,8 @@ def next_calendar_event(ics_text: str) -> dict | None:
             continue
         busy_status = microsoft_busy_status(e) if USE_MS_BUSY_STATUS else None
         event_is_ooo = is_ooo(name) or busy_status == "ooo"
-        if ALLDAY_ONLY_COUNTS_IF_OOO and is_all_day_event(e) and not event_is_ooo:
+        event_is_elsewhere = is_elsewhere(name) or busy_status == "elsewhere"
+        if ALLDAY_ONLY_COUNTS_IF_OOO and is_all_day_event(e) and not (event_is_ooo or event_is_elsewhere):
             continue
         if busy_status == "free":
             continue
@@ -1057,10 +1066,32 @@ def resolve_and_write(group: dict) -> dict:
                     name=display_name,
                     status_path=None,
                 )
+            if USE_MS_BUSY_STATUS and busy_status == "elsewhere":
+                return write_status(
+                    "elsewhere",
+                    "WORKING ELSEWHERE",
+                    detail,
+                    source="calendar",
+                    until=until,
+                    next_event_at=next_event_at,
+                    name=display_name,
+                    status_path=None,
+                )
             elif is_ooo(name):
                 return write_status(
                     "ooo",
                     "OUT OF OFFICE",
+                    detail,
+                    source="calendar",
+                    until=until,
+                    next_event_at=next_event_at,
+                    name=display_name,
+                    status_path=None,
+                )
+            elif is_elsewhere(name):
+                return write_status(
+                    "elsewhere",
+                    "WORKING ELSEWHERE",
                     detail,
                     source="calendar",
                     until=until,

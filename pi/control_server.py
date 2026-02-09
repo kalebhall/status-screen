@@ -230,6 +230,7 @@ __GROUP_SELECTOR__
   <div class="row">
     <button onclick="setOverride('available','AVAILABLE')">AVAILABLE (override)</button>
     <button onclick="setOverride('busy','BUSY')">BUSY</button>
+    <button onclick="setOverride('elsewhere','WORKING ELSEWHERE')">WORKING ELSEWHERE</button>
     <button onclick="setOverride('ooo','OUT OF OFFICE')">OUT OF OFFICE</button>
     <button onclick="clearOverride()">CLEAR OVERRIDE</button>
   </div>
