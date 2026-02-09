@@ -1157,6 +1157,10 @@ def main():
         with open(tmp, "w") as f:
             json.dump(payload, f)
         os.replace(tmp, STATUS_JSON_PATH)
+        try:
+            os.chmod(STATUS_JSON_PATH, 0o644)
+        except OSError as exc:
+            logging.warning("Failed to chmod %s: %s", STATUS_JSON_PATH, exc)
         update_epaper(payload)
     while True:
         current_mtime = get_people_config_mtime()
@@ -1180,6 +1184,10 @@ def main():
         with open(tmp, "w") as f:
             json.dump(payload, f)
         os.replace(tmp, STATUS_JSON_PATH)
+        try:
+            os.chmod(STATUS_JSON_PATH, 0o644)
+        except OSError as exc:
+            logging.warning("Failed to chmod %s: %s", STATUS_JSON_PATH, exc)
         update_epaper(payload)
         time.sleep(POLL_SECONDS)
 
