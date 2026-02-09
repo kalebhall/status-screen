@@ -7,8 +7,10 @@
 
 ## Calendar keywords for status changes
 
-All-day events only flip the status to **OUT OF OFFICE** when the event title contains one of
-these case-insensitive keywords:
+All-day events only flip the status when the event title contains one of the
+case-insensitive keywords for **OUT OF OFFICE** or **WORKING ELSEWHERE**.
+
+**OUT OF OFFICE** keywords:
 
 - `out of office`
 - `ooo`
@@ -16,6 +18,12 @@ these case-insensitive keywords:
 - `leave`
 - `pto`
 - `sick`
+
+**WORKING ELSEWHERE** keywords:
+
+- `working elsewhere`
+- `another office`
+- `other office`
 
 Events with `cancelled` or `canceled` in the title are ignored.
 
