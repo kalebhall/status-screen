@@ -1130,6 +1130,10 @@ def resolve_and_write(group: dict) -> dict:
     )
 
 def main():
+    try:
+        os.chmod(RUNTIME_DIR, 0o755)
+    except OSError as exc:
+        logging.warning("Failed to chmod runtime dir %s: %s", RUNTIME_DIR, exc)
     groups = build_groups()
     people_config_mtime = get_people_config_mtime()
     boot_people = []

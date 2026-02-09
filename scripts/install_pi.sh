@@ -20,6 +20,7 @@ sudo update-ca-certificates
 
 sudo mkdir -p "$RUNTIME_DIR"
 sudo chown -R "${STATUS_SCREEN_USER}:${STATUS_SCREEN_USER}" "$RUNTIME_DIR"
+sudo chmod 755 "$RUNTIME_DIR"
 
 # Copy repo contents into runtime dir (simple deployment model)
 rsync -a --delete --exclude '.git' "$REPO_DIR/" "$RUNTIME_DIR/"
