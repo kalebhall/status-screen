@@ -13,6 +13,7 @@ if ! id -u "$STATUS_SCREEN_USER" >/dev/null 2>&1; then
   fi
 fi
 RUNTIME_DIR="${STATUS_SCREEN_DIR:-/home/${STATUS_SCREEN_USER}/status-screen}"
+HOME_DIR="$(getent passwd "$STATUS_SCREEN_USER" | cut -d: -f6)"
 
 sudo apt update
 sudo apt install -y nginx python3-venv python3-pip ca-certificates rsync
@@ -20,6 +21,10 @@ sudo update-ca-certificates
 
 sudo mkdir -p "$RUNTIME_DIR"
 sudo chown -R "${STATUS_SCREEN_USER}:${STATUS_SCREEN_USER}" "$RUNTIME_DIR"
+sudo chmod 755 "$RUNTIME_DIR"
+if [[ -n "${HOME_DIR}" && -d "${HOME_DIR}" ]]; then
+  sudo chmod 755 "$HOME_DIR"
+fi
 
 # Copy repo contents into runtime dir (simple deployment model)
 rsync -a --delete --exclude '.git' "$REPO_DIR/" "$RUNTIME_DIR/"
@@ -30,8 +35,7 @@ sudo -u "$STATUS_SCREEN_USER" "$RUNTIME_DIR/.venv/bin/pip" install requests ical
 
 # Web
 sudo rm -rf /var/www/html/*
-sudo ln -sfn "$RUNTIME_DIR/web/index.html" /var/www/html/index.html
-sudo ln -sfn "$RUNTIME_DIR/web/admin.html" /var/www/html/admin.html
+sudo rsync -a --delete "$RUNTIME_DIR/web/" /var/www/html/
 sudo chown -R www-data:www-data /var/www/html
 sudo chmod -R 755 /var/www/html
 
