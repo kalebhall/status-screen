@@ -15,7 +15,7 @@ fi
 RUNTIME_DIR="${STATUS_SCREEN_DIR:-/home/${STATUS_SCREEN_USER}/status-screen}"
 
 sudo apt update
-sudo apt install -y nginx python3-venv python3-pip ca-certificates
+sudo apt install -y nginx python3-venv python3-pip ca-certificates rsync
 sudo update-ca-certificates
 
 sudo mkdir -p "$RUNTIME_DIR"
