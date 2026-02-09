@@ -1,3 +1,4 @@
+import argparse
 import importlib
 import json
 import logging
@@ -71,6 +72,33 @@ def parse_env_positive_int(key: str) -> int | None:
         return None
     return value
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Status Screen - ICS Calendar Resolver",
+    )
+    parser.add_argument(
+        "--cleanup-ics-cache",
+        action="store_true",
+        help="Remove obsolete cached .ics files and optionally delete old caches.",
+    )
+    parser.add_argument(
+        "--max-age-days",
+        type=int,
+        default=None,
+        help="Delete cached .ics files older than this many days.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be deleted without removing files.",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print details about what is kept.",
+    )
+    return parser.parse_args()
+
 def configure_logging():
     level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
     level = logging.INFO
@@ -98,6 +126,11 @@ ICS_CA_BUNDLE = (
 WORK_HOURS_START = os.environ.get("WORK_HOURS_START", "")
 WORK_HOURS_END = os.environ.get("WORK_HOURS_END", "")
 WORK_HOURS_DAYS = os.environ.get("WORK_HOURS_DAYS", "")
+ICS_CACHE_CLEANUP_ENABLED = parse_env_bool("ICS_CACHE_CLEANUP_ENABLED", False)
+ICS_CACHE_CLEANUP_MAX_AGE_DAYS = parse_env_positive_int("ICS_CACHE_CLEANUP_MAX_AGE_DAYS")
+ICS_CACHE_CLEANUP_INTERVAL_SECONDS = parse_env_positive_int(
+    "ICS_CACHE_CLEANUP_INTERVAL_SECONDS"
+)
 
 OOO_KEYWORDS = ["out of office", "ooo", "vacation", "leave", "pto", "sick"]
 IGNORE_KEYWORDS = ["cancelled", "canceled"]
@@ -412,6 +445,95 @@ def build_groups() -> list[dict]:
             }
         )
     return groups
+
+def cleanup_ics_cache_stats(
+    max_age_days: int | None = None,
+    dry_run: bool = False,
+    verbose: bool = False,
+) -> tuple[int, bool]:
+    if max_age_days is not None and max_age_days <= 0:
+        logging.error("--max-age-days must be a positive integer.")
+        return 0, True
+    groups = build_groups()
+    expected_cache_paths = {
+        os.path.abspath(os.path.expanduser(group["cache_path"])) for group in groups
+    }
+    cache_dir = os.path.dirname(os.path.abspath(os.path.expanduser(ICS_CACHE_PATH)))
+    if not os.path.exists(cache_dir):
+        logging.error("Cache directory does not exist: %s", cache_dir)
+        return 0, True
+
+    max_age_seconds = max_age_days * 86400 if max_age_days is not None else None
+    now = time.time()
+    removed_count = 0
+    had_error = False
+    for entry in sorted(os.listdir(cache_dir)):
+        if not entry.endswith(".ics"):
+            continue
+        path = os.path.join(cache_dir, entry)
+        resolved = os.path.abspath(path)
+        is_obsolete = resolved not in expected_cache_paths
+        is_old = False
+        if max_age_seconds is not None:
+            try:
+                age_seconds = now - os.path.getmtime(path)
+                is_old = age_seconds > max_age_seconds
+            except OSError:
+                is_old = True
+        if is_obsolete or is_old:
+            removed_count += 1
+            if dry_run:
+                print(f"[dry-run] Remove {path}")
+            else:
+                try:
+                    os.remove(path)
+                    print(f"Removed {path}")
+                except OSError as exc:
+                    had_error = True
+                    logging.warning("Failed to remove %s: %s", path, exc)
+        elif verbose:
+            print(f"Kept {path}")
+
+    if verbose:
+        print(f"Expected cache files: {len(expected_cache_paths)}")
+        for path in sorted(expected_cache_paths):
+            print(f"  expected: {path}")
+
+    print(f"Done. Removed {removed_count} file(s).")
+    return removed_count, had_error
+
+def cleanup_ics_cache(
+    max_age_days: int | None = None,
+    dry_run: bool = False,
+    verbose: bool = False,
+) -> int:
+    _, had_error = cleanup_ics_cache_stats(
+        max_age_days=max_age_days,
+        dry_run=dry_run,
+        verbose=verbose,
+    )
+    return 1 if had_error else 0
+
+def maybe_cleanup_ics_cache(last_cleanup: float | None) -> float | None:
+    if not ICS_CACHE_CLEANUP_ENABLED:
+        return last_cleanup
+    interval = ICS_CACHE_CLEANUP_INTERVAL_SECONDS or 86400
+    now = time.time()
+    if last_cleanup is not None and now - last_cleanup < interval:
+        return last_cleanup
+    logging.info(
+        "Running ICS cache cleanup (max age days=%s).",
+        ICS_CACHE_CLEANUP_MAX_AGE_DAYS,
+    )
+    removed, had_error = cleanup_ics_cache_stats(
+        max_age_days=ICS_CACHE_CLEANUP_MAX_AGE_DAYS,
+        dry_run=False,
+        verbose=False,
+    )
+    logging.info("ICS cache cleanup complete; removed %s file(s).", removed)
+    if had_error:
+        logging.warning("ICS cache cleanup completed with errors.")
+    return now
 
 DAY_NAME_TO_INDEX = {
     "mon": 0,
@@ -1130,12 +1252,23 @@ def resolve_and_write(group: dict) -> dict:
     )
 
 def main():
+    if len(sys.argv) > 1:
+        args = parse_args()
+        if args.cleanup_ics_cache:
+            return cleanup_ics_cache(
+                max_age_days=args.max_age_days,
+                dry_run=args.dry_run,
+                verbose=args.verbose,
+            )
+        logging.error("Unknown arguments provided without --cleanup-ics-cache.")
+        return 1
     try:
         os.chmod(RUNTIME_DIR, 0o755)
     except OSError as exc:
         logging.warning("Failed to chmod runtime dir %s: %s", RUNTIME_DIR, exc)
     groups = build_groups()
     people_config_mtime = get_people_config_mtime()
+    last_cleanup = None
     boot_people = []
     for group in groups:
         boot_people.append(
@@ -1171,6 +1304,7 @@ def main():
         if current_mtime != people_config_mtime:
             groups = build_groups()
             people_config_mtime = current_mtime
+        last_cleanup = maybe_cleanup_ics_cache(last_cleanup)
         people = []
         for group in groups:
             payload = resolve_and_write(group)
@@ -1196,4 +1330,4 @@ def main():
         time.sleep(POLL_SECONDS)
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -95,6 +95,21 @@ ICS_REFRESH="300"
 By default the cached file is stored at `/home/pi/status-screen/calendar.ics`. You can override the path with `ICS_CACHE_PATH` if needed.
 When using multiple groups (`ICS_URLS`), each group/person gets its own cache file derived from the base path (for example, `calendar-1.ics`, `calendar-2.ics`).
 
+To remove old or obsolete cache files, use the cleanup option (dry-run first if desired):
+
+```bash
+python3 pi/status_from_ics.py --cleanup-ics-cache --dry-run
+python3 pi/status_from_ics.py --cleanup-ics-cache --max-age-days 14
+```
+
+You can also run this cleanup automatically during the service loop with `.env` settings:
+
+```bash
+ICS_CACHE_CLEANUP_ENABLED="true"
+ICS_CACHE_CLEANUP_MAX_AGE_DAYS="14"
+ICS_CACHE_CLEANUP_INTERVAL_SECONDS="86400"
+```
+
 ## Hide calendar event titles
 
 If you prefer to keep meeting titles off the display, disable event details:
