@@ -23,11 +23,20 @@ constexpr unsigned long STATUS_REFRESH_MS = 30UL * 1000UL;
 #define EPD_DRIVER GxEPD2_579_GDEY0579T93
 #endif
 
-// TODO: Update the pin mapping for your CrowPanel wiring.
-static const uint8_t EPD_CS = 10;
-static const uint8_t EPD_DC = 9;
-static const uint8_t EPD_RST = 8;
-static const uint8_t EPD_BUSY = 7;
+// IMPORTANT: Update these pins to match your CrowPanel wiring before uploading.
+// On ESP32-S3, avoid assigning EPD pins to strapping pins GPIO 0, 3, 45, or 46.
+// Using GPIO 0 for EPD_RST or EPD_BUSY can hold the line low at power-on and
+// prevent the bootloader from starting — which makes BOOT/RESET appear broken.
+//
+// Safe SPI pins on most ESP32-S3 boards:
+//   CS   -> GPIO 10
+//   DC   -> GPIO 9
+//   RST  -> GPIO 14   <-- was 8, avoid GPIO 0
+//   BUSY -> GPIO 13   <-- was 7
+static const uint8_t EPD_CS   = 10;
+static const uint8_t EPD_DC   =  9;
+static const uint8_t EPD_RST  = 14;
+static const uint8_t EPD_BUSY = 13;
 
 GxEPD2_BW<EPD_DRIVER, EPD_DRIVER::HEIGHT> display(
     EPD_DRIVER(EPD_CS, EPD_DC, EPD_RST, EPD_BUSY));
@@ -237,6 +246,9 @@ bool isDifferent(const PersonStatus &a, const PersonStatus &b) {
 }
 
 void setup() {
+  Serial.begin(115200);
+  delay(3000); // Safety window: keeps USB-serial active so you can flash if needed
+  Serial.println("Booting status screen...");
   connectWiFi();
   display.init();
   drawStatus(lastPerson);
