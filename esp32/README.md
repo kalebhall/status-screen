@@ -53,3 +53,26 @@ sudo systemctl restart status-from-ics.service
 
 The sample sketch uses `name`, `label`, and `detail` for display.
 It also uses `state` to choose an icon to draw next to the status.
+
+## Troubleshooting: BOOT / RESET buttons not working
+
+If the physical BOOT or RESET buttons appear unresponsive, the most common cause
+is an EPD pin mapped to one of the ESP32-S3 **strapping pins**: GPIO 0, 3, 45,
+or 46. If any of those are held low by the e-paper panel during power-on, the
+chip cannot enter the bootloader.
+
+**To recover a stuck board:**
+
+1. Disconnect the e-paper panel completely.
+2. Hold the BOOT button, press and release RESET, then release BOOT.
+3. The board should enumerate as a serial/JTAG device and accept a new upload.
+4. Fix the pin assignments in the sketch (see comments near `EPD_RST`/`EPD_BUSY`)
+   so none of them overlap GPIO 0, 3, 45, or 46, then re-upload with the panel
+   disconnected, reconnect, and verify it works.
+
+**To force-flash without button access:**
+```bash
+esptool.py --chip esp32s3 --port /dev/ttyUSB0 erase_flash
+```
+
+Then re-upload from the Arduino IDE or `arduino-cli`.
