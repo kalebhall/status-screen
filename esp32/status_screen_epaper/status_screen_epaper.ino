@@ -25,6 +25,7 @@
 
 // Elecrow e-paper driver headers
 #include "EPD.h"   // provides EPD_* and Paint_* in this stack
+#include "EPDfont.h"
 
 // -------------------- USER CONFIG --------------------
 static const char *WIFI_SSID = "YOUR_WIFI_SSID";
@@ -255,6 +256,49 @@ static void drawBoldString(int x, int y, const String& s, uint16_t size) {
   EPD_ShowString((uint16_t)(x + 1), (uint16_t)y, (char*)s.c_str(), size, BLACK);
 }
 
+static int scaledSans24TextWidthPx(const String &s, uint8_t scale) {
+  return (int)s.length() * 12 * (int)scale;
+}
+
+static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale) {
+  if (scale < 1) scale = 1;
+  int cursorX = x;
+  for (size_t ci = 0; ci < s.length(); ci++) {
+    char c = s[ci];
+    if (c < ' ' || c > '~') {
+      cursorX += 12 * scale;
+      continue;
+    }
+
+    uint16_t idx = (uint16_t)(c - ' ');
+    uint16_t px = 0;
+    uint16_t py = 0;
+
+    for (uint16_t i = 0; i < 36; i++) {
+      uint8_t temp = ascii_2412[idx][i];
+      for (uint8_t bit = 0; bit < 8; bit++) {
+        if (temp & 0x01) {
+          int bx = cursorX + px * scale;
+          int by = y + (py + bit) * scale;
+          for (uint8_t sx = 0; sx < scale; sx++) {
+            for (uint8_t sy = 0; sy < scale; sy++) {
+              Paint_SetPixel(bx + sx, by + sy, BLACK);
+            }
+          }
+        }
+        temp >>= 1;
+      }
+      px++;
+      if (px == 12) {
+        px = 0;
+        py = py + 8;
+      }
+    }
+
+    cursorX += 12 * scale;
+  }
+}
+
 static void drawCheckmark(int x, int y, int w, int h, int thickness);
 
 static void drawCircle(int cx, int cy, int r, int thickness = 2) {
@@ -378,8 +422,9 @@ static void showStatusScreen(const String &nameIn,
   drawCenteredText(22, name, nameFont);
 
   // Big status + icon as a centered group.
-  // Use the largest available built-in sans bitmap font that fits.
-  uint16_t statusFont = pickFontToFit(status, EPD_W - margin * 2 - 56 - 16, 48);
+  // Render with scaled 24px sans glyphs instead of the built-in 48px style.
+  int statusMaxW = EPD_W - margin * 2 - 56 - 16;
+  uint8_t statusScale = (scaledSans24TextWidthPx(status, 2) <= statusMaxW) ? 2 : 1;
 
   int iconW = 56;
   int iconH = 56;
@@ -388,19 +433,28 @@ static void showStatusScreen(const String &nameIn,
   int maxGroupW = EPD_W - margin * 2;
 
   // Fit status text
-  status = ellipsizeToFit(status, statusFont, maxGroupW - iconW - gap);
-  int statusW = textWidthPx(status, statusFont);
+  int statusCharW = 12 * statusScale;
+  int maxChars = (maxGroupW - iconW - gap) / statusCharW;
+  if (maxChars < 1) maxChars = 1;
+  if ((int)status.length() > maxChars) {
+    if (maxChars > 3) {
+      status = status.substring(0, maxChars - 3) + "...";
+    } else {
+      status = status.substring(0, maxChars);
+    }
+  }
+  int statusW = scaledSans24TextWidthPx(status, statusScale);
 
   int groupW = iconW + gap + statusW;
   int groupX = (EPD_W - groupW) / 2;
   if (groupX < margin) groupX = margin;
 
-  int statusY = 98;          // tuned for 272px height
+  int statusY = (statusScale == 2) ? 86 : 98; // align 48px scaled text
   int iconY   = statusY - 8; // align check with word visually
   int wordX   = groupX + iconW + gap;
 
   drawStatusIcon(state, groupX, iconY, iconW, iconH);
-  drawBoldString(wordX, statusY, status, statusFont);
+  drawSans24ScaledString(wordX, statusY, status, statusScale);
 
   // Divider and detail block (closer to web layout)
   EPD_DrawLine(margin, 156, EPD_W - margin, 156, BLACK);
