@@ -51,6 +51,7 @@ static uint8_t ImageBW[27200];
 static unsigned long nextPollAt = 0;
 static uint32_t lastFingerprint = 0;
 static uint8_t partialSinceFull = 0;
+static String lastStatusSignature = "";
 
 // Button baseline (auto-detect polarity at boot)
 static int menuBaseline = HIGH;
@@ -260,10 +261,6 @@ static String ellipsizeSans56ToFit(String s, int tracking, int maxWidthPx) {
     s.remove(s.length() - 1);
   }
   return s + dots;
-}
-
-static int scaledSans24TextWidthPx(const String &s, uint8_t scale) {
-  return (int)s.length() * 12 * (int)scale;
 }
 
 static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale, int tracking = 0, bool bold = false) {
@@ -681,7 +678,18 @@ static bool fetchAndMaybeUpdateDisplay() {
     return false;
   }
 
+  String statusSignature = state + "|" + bigStatus;
+  bool statusChanged = lastStatusSignature.length() > 0 && statusSignature != lastStatusSignature;
+
   lastFingerprint = fp;
+  lastStatusSignature = statusSignature;
+
+  if (statusChanged) {
+    Serial.println("[EPD] Status changed; forcing full refresh/clear...");
+    epdFullRefreshClear();
+    showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, false);
+    return true;
+  }
 
   // Draw + partial update
   showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt);
