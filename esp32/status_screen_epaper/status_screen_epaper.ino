@@ -203,16 +203,17 @@ static String formatUntil(const String& iso, const String& source) {
     return String(buf);
   }
 
-  long hours = seconds / 3600;
-  long minutes = (seconds % 3600) / 60;
-  long remSec = seconds % 60;
+  // E-paper refresh cadence is coarse; avoid displaying seconds.
+  // Round up to the next whole minute so 4m01s -> 5m.
+  long minutesTotal = (seconds + 59) / 60;
+  long hours = minutesTotal / 60;
+  long minutes = minutesTotal % 60;
   char buf[32];
   if (hours > 0) {
     snprintf(buf, sizeof(buf), "Ends in %ldh %ldm", hours, minutes);
-  } else if (minutes > 0) {
-    snprintf(buf, sizeof(buf), "Ends in %ldm %lds", minutes, remSec);
   } else {
-    snprintf(buf, sizeof(buf), "Ends in %lds", remSec);
+    if (minutesTotal < 1) minutesTotal = 1;
+    snprintf(buf, sizeof(buf), "Ends in %ldm", minutesTotal);
   }
   return String(buf);
 }
@@ -354,7 +355,8 @@ static void showStatusScreen(const String &nameIn,
                              const String &detailIn,
                              const String &untilIn,
                              const String &sourceIn,
-                             const String &nextEventIn) {
+                             const String &nextEventIn,
+                             bool usePartialUpdate = true) {
   const int margin = 14;
 
   String name   = nameIn;
@@ -375,9 +377,9 @@ static void showStatusScreen(const String &nameIn,
   name = ellipsizeToFit(name, nameFont, nameMaxW);
   drawCenteredText(22, name, nameFont);
 
-  // Big status + checkmark as a centered group
-  // Use 24px (crisper) and bold it
-  uint16_t statusFont = 24;
+  // Big status + icon as a centered group.
+  // Use the largest available built-in sans bitmap font that fits.
+  uint16_t statusFont = pickFontToFit(status, EPD_W - margin * 2 - 56 - 16, 48);
 
   int iconW = 56;
   int iconH = 56;
@@ -431,7 +433,13 @@ static void showStatusScreen(const String &nameIn,
   }
 
   EPD_Display(ImageBW);
-  EPD_PartUpdate();
+  if (usePartialUpdate) {
+    EPD_PartUpdate();
+  } else {
+    EPD_Update();
+    // Restore fast/partial mode after a full update cycle.
+    EPD_FastMode1Init();
+  }
 }
 
 static void showStatusSplash(const String &line1, const String &line2) {
@@ -544,7 +552,8 @@ static bool fetchAndMaybeUpdateDisplay() {
 
   // Choose what goes where:
   String topName   = name;
-  String bigStatus = (state.length() ? state : label);
+  // Match web UI: show label text as the primary status word.
+  String bigStatus = (label.length() ? label : state);
 
   // Detail line fallback
   String detailLine = detail;
@@ -574,7 +583,7 @@ static bool fetchAndMaybeUpdateDisplay() {
     epdFullRefreshClear();
 
     // Re-draw current content after a full clear
-    showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt);
+    showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, false);
   }
 
   return true;
