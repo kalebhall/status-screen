@@ -1,269 +1,492 @@
+
+/*  CrowPanel ESP32 5.79" E-Paper (272x792) — Elecrow SSD1683 EPD.h driver
+
+  What this sketch does:
+  - Connects to Wi-Fi (with timeout)
+  - Initializes time via NTP (so we can render a timestamp)
+  - Polls STATUS_URL once per minute
+  - Extracts a target person's fields from JSON (name/label/state/detail/next_event_at)
+  - Computes a fingerprint of what would be displayed INCLUDING the current minute (keeps clock alive)
+  - ONLY updates the e-paper when the fingerprint changes
+  - Long-press MENU or BACK for ~1.5s to reboot (ESP.restart)
+
+  Notes:
+  - Uses Elecrow's EPD.h stack (which pulls in GUI_Paint / Paint_*)
+  - Powers panel rails (GPIO 7 and 42) like Elecrow examples do
+*/
+
+#include <Arduino.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-#include <GxEPD2_BW.h>
-#include <Fonts/FreeMonoBold18pt7b.h>
-#include <Fonts/FreeMonoBold24pt7b.h>
-#include <Fonts/FreeMonoBold9pt7b.h>
+#include <SPI.h>
+#include <time.h>
+#include <esp_wifi.h>
 
-// --- Wi-Fi + API configuration ---
-const char *WIFI_SSID = "YOUR_WIFI_SSID";
-const char *WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
-const char *STATUS_URL = "http://<pi-ip>/status.json";
-const char *TARGET_PERSON = "alex"; // Match against the "name" field (case-insensitive).
+// Elecrow e-paper driver headers
+#include "EPD.h"   // provides EPD_* and Paint_* in this stack
 
-// Polling interval (milliseconds).
-constexpr unsigned long STATUS_REFRESH_MS = 30UL * 1000UL;
+// -------------------- USER CONFIG --------------------
+static const char *WIFI_SSID = "YOUR_WIFI_SSID";
+static const char *WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+static const char *STATUS_URL = "http://<pi-ip>/status.json";
+static const char *TARGET_PERSON = "alex"; // Match against the "name" field (case-insensitive).
 
-// --- Display configuration ---
-// Select the correct GxEPD2 driver for your panel. For example, a 5.79" 792x272
-// panel may use GxEPD2_579_GDEY0579T93 (confirm in your panel datasheet and the
-// GxEPD2 examples).
-#ifndef EPD_DRIVER
-#define EPD_DRIVER GxEPD2_579_GDEY0579T93
-#endif
+// Poll server every minute
+constexpr unsigned long POLL_MS = 60UL * 1000UL;
 
-// IMPORTANT: Update these pins to match your CrowPanel wiring before uploading.
-// On ESP32-S3, avoid assigning EPD pins to strapping pins GPIO 0, 3, 45, or 46.
-// Using GPIO 0 for EPD_RST or EPD_BUSY can hold the line low at power-on and
-// prevent the bootloader from starting — which makes BOOT/RESET appear broken.
-//
-// Safe SPI pins on most ESP32-S3 boards:
-//   CS   -> GPIO 10
-//   DC   -> GPIO 9
-//   RST  -> GPIO 14   <-- was 8, avoid GPIO 0
-//   BUSY -> GPIO 13   <-- was 7
-static const uint8_t EPD_CS   = 10;
-static const uint8_t EPD_DC   =  9;
-static const uint8_t EPD_RST  = 14;
-static const uint8_t EPD_BUSY = 13;
+// Full refresh every N partial updates (helps reduce ghosting)
+constexpr uint8_t FULL_REFRESH_EVERY = 30;  // ~30 minutes if changing every minute
 
-GxEPD2_BW<EPD_DRIVER, EPD_DRIVER::HEIGHT> display(
-    EPD_DRIVER(EPD_CS, EPD_DC, EPD_RST, EPD_BUSY));
+// CrowPanel buttons (per Elecrow docs; some board revs may vary)
+static const uint8_t BTN_MENU = 2; // MENU
+static const uint8_t BTN_BACK = 1; // EXIT/BACK
 
-struct PersonStatus {
-  String name;
-  String label;
-  String detail;
-  String state;
-  bool valid = false;
-};
+// -------------------- DISPLAY BUFFER --------------------
+// 792*272/8 = 26928 bytes; Elecrow examples often allocate ~27200.
+static uint8_t ImageBW[27200];
 
-unsigned long lastRefresh = 0;
-PersonStatus lastPerson;
+// -------------------- STATE --------------------
+static unsigned long nextPollAt = 0;
+static uint32_t lastFingerprint = 0;
+static uint8_t partialSinceFull = 0;
 
-void connectWiFi() {
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 20000) {
-    delay(200);
+// Button baseline (auto-detect polarity at boot)
+static int menuBaseline = HIGH;
+static int backBaseline = HIGH;
+
+// -------------------- HELPERS --------------------
+static uint32_t fnv1a32(const String &s) {
+  uint32_t h = 2166136261u;
+  for (size_t i = 0; i < s.length(); i++) {
+    h ^= (uint8_t)s[i];
+    h *= 16777619u;
   }
+  return h;
 }
 
-String normalizeName(const String &value) {
-  String normalized = value;
-  normalized.toLowerCase();
-  return normalized;
+static inline bool buttonPressed(uint8_t pin, int baseline) {
+  // Treat "changed from baseline" as pressed (works for active-low and active-high)
+  return digitalRead(pin) != baseline;
 }
 
-PersonStatus parseStatusPayload(const String &payload) {
-  PersonStatus result;
-  StaticJsonDocument<8192> doc;
-  DeserializationError error = deserializeJson(doc, payload);
-  if (error) {
-    return result;
-  }
+static void epdFullRefreshClear() {
+  // Full clear/update sequence (per typical Elecrow flows)
+  EPD_Display_Clear();
+  EPD_Update();
+  partialSinceFull = 0;
+}
 
-  JsonArray people = doc["people"].as<JsonArray>();
-  if (people.isNull() || people.size() == 0) {
-    return result;
-  }
+static String getMacString() {
+  // MAC is available even if not connected
+  uint8_t mac[6];
+  esp_wifi_get_mac(WIFI_IF_STA, mac);
 
-  const String target = normalizeName(String(TARGET_PERSON));
-  for (JsonObject person : people) {
-    String name = String(person["name"] | "");
-    if (target.length() && normalizeName(name) != target) {
-      continue;
+  char buf[18];
+  snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  return String(buf);
+}
+
+// ---- Time init (Nevada/Pacific) ----
+static void initTimePacific() {
+  // Nevada/Pacific time with DST rules
+  setenv("TZ", "PST8PDT,M3.2.0,M11.1.0", 1);
+  tzset();
+
+  // NTP
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+}
+
+static String formatLocalTimestamp() {
+  struct tm t;
+  if (!getLocalTime(&t, 50)) return "";
+
+  char buf[32];
+  int hour = t.tm_hour % 12;
+  if (hour == 0) hour = 12;
+  const char *ampm = (t.tm_hour >= 12) ? "PM" : "AM";
+
+  snprintf(buf, sizeof(buf), "%02d/%02d/%04d %d:%02d %s",
+           t.tm_mon + 1, t.tm_mday, t.tm_year + 1900,
+           hour, t.tm_min, ampm);
+
+  return String(buf);
+}
+
+// A short per-minute key so the screen updates even when status doesn't change
+static String minuteKey() {
+  struct tm t;
+  if (!getLocalTime(&t, 10)) return ""; // no time yet, don't force minute refresh
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%02d%02d", t.tm_hour, t.tm_min);
+  return String(buf);
+}
+
+// ---- Next event formatter ----
+static String formatNextEvent(const String& iso) {
+  // expects: YYYY-MM-DDTHH:MM:SS-08:00 (or similar)
+  if (iso.length() < 16) return "";
+
+  int hh = iso.substring(11, 13).toInt();
+  int mm = iso.substring(14, 16).toInt();
+
+  int h12 = hh % 12;
+  if (h12 == 0) h12 = 12;
+  const char *ampm = (hh >= 12) ? "PM" : "AM";
+
+  char buf[40];
+  snprintf(buf, sizeof(buf), "Next event at %d:%02d %s", h12, mm, ampm);
+  return String(buf);
+}
+
+// -------------------- DRAWING HELPERS --------------------
+// Your EPD_ShowString advances x by (size/2) per char (monospace-ish)
+static int textWidthPx(const String &s, uint16_t fontSize) {
+  return (int)s.length() * (int)(fontSize / 2);
+}
+
+static String ellipsizeToFit(String s, uint16_t fontSize, int maxWidthPx) {
+  if (textWidthPx(s, fontSize) <= maxWidthPx) return s;
+  const String dots = "...";
+  while (s.length() > 0 && textWidthPx(s + dots, fontSize) > maxWidthPx) {
+    s.remove(s.length() - 1);
+  }
+  return s + dots;
+}
+
+static uint16_t pickFontToFit(const String &s, int maxWidthPx, uint16_t preferred) {
+  // allowed sizes in your EPD_ShowChar: 12, 16, 24, 48
+  const uint16_t sizes[] = { preferred, 24, 16, 12 };
+  for (uint16_t sz : sizes) {
+    if (textWidthPx(s, sz) <= maxWidthPx) return sz;
+  }
+  return 12;
+}
+
+static void drawCenteredText(int y, const String &s, uint16_t fontSize) {
+  int w = textWidthPx(s, fontSize);
+  int x = (EPD_W - w) / 2;
+  if (x < 0) x = 0;
+  EPD_ShowString((uint16_t)x, (uint16_t)y, (char*)s.c_str(), fontSize, BLACK);
+}
+
+static void drawBoldString(int x, int y, const String& s, uint16_t size) {
+  // Faux bold: draw twice with a 1px offset. Looks cleaner than 48px glyphs on many panels.
+  EPD_ShowString((uint16_t)x, (uint16_t)y, (char*)s.c_str(), size, BLACK);
+  EPD_ShowString((uint16_t)(x + 1), (uint16_t)y, (char*)s.c_str(), size, BLACK);
+}
+
+// Pixel-drawn checkmark
+static void drawCheckmark(int x, int y, int w, int h, int thickness = 2) {
+  int x1 = x + (w * 20) / 100;
+  int y1 = y + (h * 55) / 100;
+  int x2 = x + (w * 40) / 100;
+  int y2 = y + (h * 75) / 100;
+  int x3 = x + (w * 80) / 100;
+  int y3 = y + (h * 30) / 100;
+
+  auto drawThickLine = [&](int ax, int ay, int bx, int by) {
+    int dx = abs(bx - ax), sx = ax < bx ? 1 : -1;
+    int dy = -abs(by - ay), sy = ay < by ? 1 : -1;
+    int err = dx + dy;
+
+    while (true) {
+      for (int tx = -thickness; tx <= thickness; tx++) {
+        for (int ty = -thickness; ty <= thickness; ty++) {
+          Paint_SetPixel(ax + tx, ay + ty, BLACK);
+        }
+      }
+      if (ax == bx && ay == by) break;
+      int e2 = 2 * err;
+      if (e2 >= dy) { err += dy; ax += sx; }
+      if (e2 <= dx) { err += dx; ay += sy; }
     }
-    result.name = name;
-    result.label = String(person["label"] | "");
-    result.detail = String(person["detail"] | "");
-    result.state = String(person["state"] | "");
-    result.valid = true;
-    return result;
-  }
+  };
 
-  result.name = String(TARGET_PERSON);
-  result.detail = "No matching person found";
-  return result;
+  drawThickLine(x1, y1, x2, y2);
+  drawThickLine(x2, y2, x3, y3);
 }
 
-PersonStatus fetchStatus() {
-  PersonStatus result;
-  if (WiFi.status() != WL_CONNECTED) {
-    connectWiFi();
+// -------------------- MAIN STATUS SCREEN --------------------
+static void showStatusScreen(const String &nameIn,
+                             const String &statusIn,
+                             const String &detailIn) {
+  const int margin = 14;
+
+  String name   = nameIn;
+  String status = statusIn;
+  String detail = detailIn;
+
+  // Make status read like the photo
+  status.toUpperCase();
+
+  // New image buffer
+  Paint_NewImage(ImageBW, EPD_W, EPD_H, Rotation, WHITE);
+  Paint_Clear(WHITE);
+
+  // Top name (centered)
+  int nameMaxW = EPD_W - margin * 2;
+  uint16_t nameFont = pickFontToFit(name, nameMaxW, 24);
+  name = ellipsizeToFit(name, nameFont, nameMaxW);
+  drawCenteredText(22, name, nameFont);
+
+  // Big status + checkmark as a centered group
+  // Use 24px (crisper) and bold it
+  uint16_t statusFont = 24;
+
+  int iconW = 56;
+  int iconH = 56;
+  int gap   = 16;
+
+  int maxGroupW = EPD_W - margin * 2;
+
+  // Fit status text
+  status = ellipsizeToFit(status, statusFont, maxGroupW - iconW - gap);
+  int statusW = textWidthPx(status, statusFont);
+
+  int groupW = iconW + gap + statusW;
+  int groupX = (EPD_W - groupW) / 2;
+  if (groupX < margin) groupX = margin;
+
+  int statusY = 98;          // tuned for 272px height
+  int iconY   = statusY - 8; // align check with word visually
+  int wordX   = groupX + iconW + gap;
+
+  drawCheckmark(groupX, iconY, iconW, iconH, 2);
+  drawBoldString(wordX, statusY, status, statusFont);
+
+  // Detail line (centered)
+  int detailMaxW = EPD_W - margin * 2;
+  uint16_t detailFont = pickFontToFit(detail, detailMaxW, 24);
+  detail = ellipsizeToFit(detail, detailFont, detailMaxW);
+  drawCenteredText(168, detail, detailFont);
+
+  // Bottom-right timestamp
+  String ts = formatLocalTimestamp();
+  if (ts.length()) {
+    uint16_t tsFont = 16;
+    int tsW = textWidthPx(ts, tsFont);
+    int tsX = EPD_W - margin - tsW;
+    int tsY = EPD_H - margin - tsFont;
+    if (tsX < margin) tsX = margin;
+    EPD_ShowString((uint16_t)tsX, (uint16_t)tsY, (char*)ts.c_str(), tsFont, BLACK);
   }
+
+  EPD_Display(ImageBW);
+  EPD_PartUpdate();
+}
+
+static void showStatusSplash(const String &line1, const String &line2) {
+  // Use the same status layout for splash screens
+  showStatusScreen(line1, line2, "");
+}
+
+// -------------------- PANEL INIT --------------------
+static void initPanel() {
+  // Panel power rails (Elecrow examples set these high first)
+  pinMode(7, OUTPUT);
+  digitalWrite(7, HIGH);
+  pinMode(42, OUTPUT);
+  digitalWrite(42, HIGH);
+  delay(10);
+
+  // Init display + paint buffer
+  EPD_GPIOInit();
+
+  Paint_NewImage(ImageBW, EPD_W, EPD_H, Rotation, WHITE);
+  Paint_Clear(WHITE);
+
+  // Fast partial mode init
+  EPD_FastMode1Init();
+
+  // Do an initial clear
+  epdFullRefreshClear();
+}
+
+static void handleRebootButtons() {
+  static unsigned long downSince = 0;
+
+  bool down = buttonPressed(BTN_MENU, menuBaseline) || buttonPressed(BTN_BACK, backBaseline);
+
+  if (!down) {
+    downSince = 0;
+    return;
+  }
+
+  if (downSince == 0) downSince = millis();
+
+  if (millis() - downSince >= 1500) {
+    showStatusSplash("Rebooting...", "");
+    delay(150);
+    ESP.restart();
+  }
+}
+
+// -------------------- NETWORK / JSON --------------------
+static bool fetchAndMaybeUpdateDisplay() {
   if (WiFi.status() != WL_CONNECTED) {
-    return result;
+    // Don't spam partial refreshes; show a useful offline screen.
+    showStatusScreen("WIFI OFFLINE", "OFFLINE", "MAC " + getMacString());
+    return false;
   }
 
   HTTPClient http;
-  http.setTimeout(8000);
   http.begin(STATUS_URL);
   int code = http.GET();
-  if (code == HTTP_CODE_OK) {
-    String payload = http.getString();
-    result = parseStatusPayload(payload);
+
+  if (code != 200) {
+    http.end();
+    showStatusScreen("HTTP ERROR", "OFFLINE", String(code));
+    return false;
   }
+
+  String payload = http.getString();
   http.end();
-  return result;
+
+  // Parse JSON
+  StaticJsonDocument<8192> doc;
+  DeserializationError err = deserializeJson(doc, payload);
+  if (err) {
+    showStatusScreen("JSON ERROR", "OFFLINE", err.c_str());
+    return false;
+  }
+
+  String target = String(TARGET_PERSON);
+  target.toLowerCase();
+
+  String name, label, state, detail, nextEventAt;
+
+  JsonArray people = doc["people"].as<JsonArray>();
+  for (JsonObject p : people) {
+    const char *n = p["name"] | "";
+    String n2(n);
+    n2.toLowerCase();
+
+    if (n2 == target) {
+      name        = String(n);
+      label       = String((const char*)(p["label"]         | ""));
+      state       = String((const char*)(p["state"]         | ""));
+      detail      = String((const char*)(p["detail"]        | ""));
+      nextEventAt = String((const char*)(p["next_event_at"] | ""));
+      break;
+    }
+  }
+
+  if (name.length() == 0) {
+    name = "Not found";
+    label = TARGET_PERSON;
+    state = "";
+    detail = "";
+    nextEventAt = "";
+  }
+
+  // Choose what goes where:
+  String topName   = name;
+  String bigStatus = (state.length() ? state : label);
+
+  // Detail line: prefer detail; else format next_event_at
+  String detailLine = detail;
+  if (detailLine.length() == 0 && nextEventAt.length()) {
+    detailLine = formatNextEvent(nextEventAt);
+  }
+  // still nothing? fallback to label
+  if (detailLine.length() == 0) {
+    detailLine = label;
+  }
+
+  // Fingerprint what matters + current minute (so clock updates)
+  String displayKey = topName + "|" + bigStatus + "|" + detailLine + "|" + minuteKey();
+  uint32_t fp = fnv1a32(displayKey);
+
+  if (fp == lastFingerprint) {
+    Serial.println("[EPD] No change; skipping update.");
+    return false;
+  }
+
+  lastFingerprint = fp;
+
+  // Draw + partial update
+  showStatusScreen(topName, bigStatus, detailLine);
+
+  partialSinceFull++;
+  Serial.printf("[EPD] Updated. partialSinceFull=%u\n", partialSinceFull);
+
+  if (partialSinceFull >= FULL_REFRESH_EVERY) {
+    Serial.println("[EPD] Doing full refresh/clear to reduce ghosting...");
+    epdFullRefreshClear();
+
+    // Re-draw current content after a full clear
+    showStatusScreen(topName, bigStatus, detailLine);
+  }
+
+  return true;
 }
 
-const uint8_t ICON_CHECK[] PROGMEM = {
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x01, 0x80, 0x00, 0x00, 0x03, 0xC0, 0x00,
-  0x00, 0x07, 0xE0, 0x00, 0x00, 0x0F, 0xF0, 0x00,
-  0x00, 0x1F, 0xF8, 0x00, 0x00, 0x3F, 0xFC, 0x00,
-  0x00, 0x7F, 0xFE, 0x00, 0x00, 0xFF, 0xFF, 0x00,
-  0x01, 0xFE, 0x7F, 0x80, 0x03, 0xFC, 0x3F, 0xC0,
-  0x07, 0xF8, 0x1F, 0xE0, 0x0F, 0xF0, 0x0F, 0xF0,
-  0x1F, 0xE0, 0x07, 0xF8, 0x3F, 0xC0, 0x03, 0xFC,
-  0x7F, 0x80, 0x01, 0xFE, 0xFF, 0x00, 0x00, 0xFF,
-  0x7E, 0x00, 0x00, 0x7E, 0x3C, 0x00, 0x00, 0x3C,
-  0x18, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-};
+// -------------------- WIFI CONNECT --------------------
+static bool connectWifiWithTimeout(uint32_t timeoutMs) {
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-const uint8_t ICON_STOP[] PROGMEM = {
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x3F, 0xFC, 0x00, 0x00, 0xFF, 0xFF, 0x00,
-  0x01, 0xFF, 0xFF, 0x80, 0x03, 0xFF, 0xFF, 0xC0,
-  0x07, 0xE0, 0x07, 0xE0, 0x0F, 0xC0, 0x03, 0xF0,
-  0x1F, 0x80, 0x01, 0xF8, 0x3F, 0x80, 0x01, 0xFC,
-  0x3F, 0x80, 0x01, 0xFC, 0x3F, 0x80, 0x01, 0xFC,
-  0x3F, 0x80, 0x01, 0xFC, 0x3F, 0x80, 0x01, 0xFC,
-  0x3F, 0x80, 0x01, 0xFC, 0x3F, 0x80, 0x01, 0xFC,
-  0x1F, 0x80, 0x01, 0xF8, 0x0F, 0xC0, 0x03, 0xF0,
-  0x07, 0xE0, 0x07, 0xE0, 0x03, 0xFF, 0xFF, 0xC0,
-  0x01, 0xFF, 0xFF, 0x80, 0x00, 0xFF, 0xFF, 0x00,
-  0x00, 0x3F, 0xFC, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-};
-
-const uint8_t ICON_CALENDAR[] PROGMEM = {
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x7F, 0xFE, 0x00,
-  0x01, 0xFF, 0xFF, 0x80, 0x03, 0xC0, 0x03, 0xC0,
-  0x07, 0xBF, 0xFD, 0xE0, 0x0F, 0xBF, 0xFD, 0xF0,
-  0x1F, 0x80, 0x01, 0xF8, 0x3F, 0x80, 0x01, 0xFC,
-  0x3F, 0xBF, 0xFD, 0xFC, 0x3F, 0xBF, 0xFD, 0xFC,
-  0x3F, 0x80, 0x01, 0xFC, 0x3F, 0x80, 0x01, 0xFC,
-  0x3F, 0xBF, 0xFD, 0xFC, 0x3F, 0xBF, 0xFD, 0xFC,
-  0x3F, 0x80, 0x01, 0xFC, 0x3F, 0x80, 0x01, 0xFC,
-  0x1F, 0x80, 0x01, 0xF8, 0x0F, 0xBF, 0xFD, 0xF0,
-  0x07, 0xBF, 0xFD, 0xE0, 0x03, 0xC0, 0x03, 0xC0,
-  0x01, 0xFF, 0xFF, 0x80, 0x00, 0x7F, 0xFE, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-};
-
-const uint8_t ICON_PLANE[] PROGMEM = {
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x80, 0x00,
-  0x00, 0x03, 0xC0, 0x00, 0x00, 0x07, 0xE0, 0x00,
-  0x00, 0x0F, 0xF0, 0x00, 0x00, 0x1F, 0xF8, 0x00,
-  0x00, 0x3F, 0xFC, 0x00, 0x00, 0x7F, 0xFE, 0x00,
-  0x00, 0xFF, 0xFF, 0x00, 0x1F, 0xFF, 0xFF, 0xF8,
-  0x3F, 0xFF, 0xFF, 0xFC, 0x1F, 0xFF, 0xFF, 0xF8,
-  0x00, 0xFF, 0xFF, 0x00, 0x00, 0x7F, 0xFE, 0x00,
-  0x00, 0x3F, 0xFC, 0x00, 0x00, 0x1F, 0xF8, 0x00,
-  0x00, 0x0F, 0xF0, 0x00, 0x00, 0x07, 0xE0, 0x00,
-  0x00, 0x03, 0xC0, 0x00, 0x00, 0x01, 0x80, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-};
-
-const uint8_t ICON_WARNING[] PROGMEM = {
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x80, 0x00,
-  0x00, 0x03, 0xC0, 0x00, 0x00, 0x07, 0xE0, 0x00,
-  0x00, 0x0F, 0xF0, 0x00, 0x00, 0x1F, 0xF8, 0x00,
-  0x00, 0x3F, 0xFC, 0x00, 0x00, 0x7F, 0xFE, 0x00,
-  0x00, 0xFF, 0xFF, 0x00, 0x01, 0xFF, 0xFF, 0x80,
-  0x03, 0xFF, 0xFF, 0xC0, 0x07, 0xFF, 0xFF, 0xE0,
-  0x0F, 0xFF, 0xFF, 0xF0, 0x1F, 0xFF, 0xFF, 0xF8,
-  0x3F, 0xFF, 0xFF, 0xFC, 0x3F, 0xFF, 0xFF, 0xFC,
-  0x1F, 0xFF, 0xFF, 0xF8, 0x0F, 0xFF, 0xFF, 0xF0,
-  0x07, 0xFF, 0xFF, 0xE0, 0x03, 0xFF, 0xFF, 0xC0,
-  0x01, 0xFF, 0xFF, 0x80, 0x00, 0xFF, 0xFF, 0x00,
-};
-
-const uint8_t *resolveIcon(const String &state) {
-  String normalized = normalizeName(state);
-  if (normalized == "available") {
-    return ICON_CHECK;
+  uint32_t start = millis();
+  while (WiFi.status() != WL_CONNECTED && (millis() - start) < timeoutMs) {
+    handleRebootButtons();
+    delay(50);
   }
-  if (normalized == "busy") {
-    return ICON_STOP;
-  }
-  if (normalized == "meeting") {
-    return ICON_CALENDAR;
-  }
-  if (normalized == "ooo") {
-    return ICON_PLANE;
-  }
-  return ICON_WARNING;
+  return (WiFi.status() == WL_CONNECTED);
 }
 
-void drawStatus(const PersonStatus &status) {
-  display.setFullWindow();
-  display.firstPage();
-  do {
-    display.fillScreen(GxEPD_WHITE);
-    display.setTextColor(GxEPD_BLACK);
-
-    const uint8_t *icon = resolveIcon(status.state);
-    display.drawBitmap(10, 10, icon, 32, 32, GxEPD_BLACK);
-
-    int16_t cursorY = 60;
-    display.setFont(&FreeMonoBold24pt7b);
-    display.setCursor(50, cursorY);
-    display.print(status.valid ? status.name : "STATUS");
-
-    cursorY += 60;
-    display.setFont(&FreeMonoBold18pt7b);
-    display.setCursor(50, cursorY);
-    display.print(status.valid ? status.label : "OFFLINE");
-
-    cursorY += 40;
-    display.setFont(&FreeMonoBold9pt7b);
-    display.setCursor(50, cursorY);
-    display.print(status.valid ? status.detail : "Unable to fetch status.json");
-  } while (display.nextPage());
-}
-
-bool isDifferent(const PersonStatus &a, const PersonStatus &b) {
-  return a.valid != b.valid || a.name != b.name || a.label != b.label || a.detail != b.detail ||
-         a.state != b.state;
-}
-
+// -------------------- ARDUINO --------------------
 void setup() {
   Serial.begin(115200);
-  delay(3000); // Safety window: keeps USB-serial active so you can flash if needed
-  Serial.println("Booting status screen...");
-  connectWiFi();
-  display.init();
-  drawStatus(lastPerson);
+  delay(50);
+
+  // Ensure WiFi stack is initialized enough for MAC reads
+  WiFi.mode(WIFI_STA);
+
+  // Buttons
+  pinMode(BTN_MENU, INPUT_PULLUP);
+  pinMode(BTN_BACK, INPUT_PULLUP);
+  delay(10);
+  menuBaseline = digitalRead(BTN_MENU);
+  backBaseline = digitalRead(BTN_BACK);
+  Serial.printf("Button baselines: MENU=%s, BACK=%s\n",
+                menuBaseline ? "HIGH" : "LOW",
+                backBaseline ? "HIGH" : "LOW");
+
+  // Display
+  initPanel();
+  showStatusSplash("Booting...", "Starting WiFi");
+
+  // WiFi
+  bool ok = connectWifiWithTimeout(20000UL);
+
+  if (ok) {
+    Serial.print("WiFi connected: ");
+    Serial.println(WiFi.localIP());
+    showStatusSplash("WiFi OK", WiFi.localIP().toString());
+
+    // Time init so timestamp renders
+    initTimePacific();
+  } else {
+    Serial.println("WiFi failed to connect.");
+    // Show MAC so you can identify the device even when offline
+    showStatusScreen("WIFI FAILED", "OFFLINE", "MAC " + getMacString());
+  }
+
+  // Poll immediately on boot
+  nextPollAt = millis();
 }
 
 void loop() {
+  handleRebootButtons();
+
   unsigned long now = millis();
-  if (now - lastRefresh < STATUS_REFRESH_MS) {
-    delay(100);
-    return;
+  if ((long)(now - nextPollAt) >= 0) {
+    nextPollAt = now + POLL_MS;
+    Serial.println("[NET] Polling server...");
+    fetchAndMaybeUpdateDisplay();
   }
-  lastRefresh = now;
-  PersonStatus current = fetchStatus();
-  if (isDifferent(current, lastPerson)) {
-    drawStatus(current);
-    lastPerson = current;
-  }
+
+  delay(20);
 }
