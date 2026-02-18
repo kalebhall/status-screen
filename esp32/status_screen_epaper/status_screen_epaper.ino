@@ -254,7 +254,7 @@ static void drawBoldString(int x, int y, const String& s, uint16_t size) {
   EPD_ShowString((uint16_t)(x + 1), (uint16_t)y, (char*)s.c_str(), size, BLACK);
 }
 
-static void drawCheckmark(int x, int y, int w, int h, int thickness = 2);
+static void drawCheckmark(int x, int y, int w, int h, int thickness);
 
 static void drawCircle(int cx, int cy, int r, int thickness = 2) {
   for (int deg = 0; deg < 360; deg++) {
@@ -279,33 +279,33 @@ static void drawStatusIcon(const String& state, int x, int y, int w, int h) {
   if (s == "busy") {
     drawCircle(x + w / 2, y + h / 2, min(w, h) / 2 - 3, 2);
     for (int i = 0; i < 3; i++) {
-      Paint_DrawLine(x + 10 + i, y + h - 10, x + w - 10 + i, y + 10, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+      EPD_DrawLine(x + 10 + i, y + h - 10, x + w - 10 + i, y + 10, BLACK);
     }
     return;
   }
 
   if (s == "meeting") {
-    Paint_DrawRectangle(x + 4, y + 10, x + w - 4, y + h - 6, BLACK, DOT_PIXEL_1X1, DRAW_FILL_EMPTY);
-    Paint_DrawLine(x + 4, y + 20, x + w - 4, y + 20, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
-    Paint_DrawLine(x + 14, y + 6, x + 14, y + 16, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
-    Paint_DrawLine(x + w - 14, y + 6, x + w - 14, y + 16, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+    EPD_DrawRectangle(x + 4, y + 10, x + w - 4, y + h - 6, BLACK, 0);
+    EPD_DrawLine(x + 4, y + 20, x + w - 4, y + 20, BLACK);
+    EPD_DrawLine(x + 14, y + 6, x + 14, y + 16, BLACK);
+    EPD_DrawLine(x + w - 14, y + 6, x + w - 14, y + 16, BLACK);
     return;
   }
 
   if (s == "ooo") {
     // Airplane-ish icon.
-    Paint_DrawLine(x + 8, y + h - 14, x + w - 8, y + 12, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
-    Paint_DrawLine(x + w - 18, y + 22, x + w - 8, y + 12, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
-    Paint_DrawLine(x + w - 24, y + 18, x + w - 16, y + 30, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
-    Paint_DrawLine(x + 18, y + h - 12, x + 28, y + h - 2, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+    EPD_DrawLine(x + 8, y + h - 14, x + w - 8, y + 12, BLACK);
+    EPD_DrawLine(x + w - 18, y + 22, x + w - 8, y + 12, BLACK);
+    EPD_DrawLine(x + w - 24, y + 18, x + w - 16, y + 30, BLACK);
+    EPD_DrawLine(x + 18, y + h - 12, x + 28, y + h - 2, BLACK);
     return;
   }
 
   // Error / unknown: warning triangle.
-  Paint_DrawLine(x + w / 2, y + 8, x + 8, y + h - 6, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
-  Paint_DrawLine(x + 8, y + h - 6, x + w - 8, y + h - 6, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
-  Paint_DrawLine(x + w - 8, y + h - 6, x + w / 2, y + 8, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
-  Paint_DrawLine(x + w / 2, y + 18, x + w / 2, y + h - 16, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+  EPD_DrawLine(x + w / 2, y + 8, x + 8, y + h - 6, BLACK);
+  EPD_DrawLine(x + 8, y + h - 6, x + w - 8, y + h - 6, BLACK);
+  EPD_DrawLine(x + w - 8, y + h - 6, x + w / 2, y + 8, BLACK);
+  EPD_DrawLine(x + w / 2, y + 18, x + w / 2, y + h - 16, BLACK);
   Paint_SetPixel(x + w / 2, y + h - 11, BLACK);
 }
 
@@ -317,7 +317,7 @@ static void drawCenteredLines(int yStart, String lines[], int lineCount, uint16_
 }
 
 // Pixel-drawn checkmark
-static void drawCheckmark(int x, int y, int w, int h, int thickness = 2) {
+static void drawCheckmark(int x, int y, int w, int h, int thickness) {
   int x1 = x + (w * 20) / 100;
   int y1 = y + (h * 55) / 100;
   int x2 = x + (w * 40) / 100;
@@ -401,7 +401,7 @@ static void showStatusScreen(const String &nameIn,
   drawBoldString(wordX, statusY, status, statusFont);
 
   // Divider and detail block (closer to web layout)
-  Paint_DrawLine(margin, 156, EPD_W - margin, 156, BLACK, DOT_PIXEL_1X1, LINE_STYLE_DOTTED);
+  EPD_DrawLine(margin, 156, EPD_W - margin, 156, BLACK);
 
   String detailLine = detail;
   String untilLine = formatUntil(untilIn, sourceIn);
@@ -416,7 +416,7 @@ static void showStatusScreen(const String &nameIn,
   drawCenteredLines(168, lines, 3, 16, 6);
 
   if (sourceIn == "working_hours") {
-    Paint_DrawLine(margin, 222, EPD_W - margin, 222, BLACK, DOT_PIXEL_1X1, LINE_STYLE_DOTTED);
+    EPD_DrawLine(margin, 222, EPD_W - margin, 222, BLACK);
   }
 
   // Bottom-right timestamp
