@@ -415,26 +415,31 @@ static void showStatusScreen(const String &nameIn,
   Paint_NewImage(ImageBW, EPD_W, EPD_H, Rotation, WHITE);
   Paint_Clear(WHITE);
 
-  // Top name (centered)
+  // Top name (centered, sans-serif scale 1 = 24px)
   int nameMaxW = EPD_W - margin * 2;
-  uint16_t nameFont = pickFontToFit(name, nameMaxW, 24);
-  name = ellipsizeToFit(name, nameFont, nameMaxW);
-  drawCenteredText(22, name, nameFont);
+  name = ellipsizeToFit(name, 24, nameMaxW);
+  {
+    int nw = scaledSans24TextWidthPx(name, 1);
+    int nx = (EPD_W - nw) / 2;
+    if (nx < 0) nx = 0;
+    drawSans24ScaledString(nx, 8, name, 1);
+  }
 
-  // Big status + icon as a centered group.
-  // Render with scaled 24px sans glyphs instead of the built-in 48px style.
-  int statusMaxW = EPD_W - margin * 2 - 56 - 16;
-  uint8_t statusScale = (scaledSans24TextWidthPx(status, 2) <= statusMaxW) ? 2 : 1;
-
-  int iconW = 56;
-  int iconH = 56;
+  // Big status + icon as a centered group (sans-serif; prefer scale 3 = 72px tall).
+  int iconW = 72;
+  int iconH = 72;
   int gap   = 16;
 
   int maxGroupW = EPD_W - margin * 2;
+  int statusMaxW = maxGroupW - iconW - gap;
 
-  // Fit status text
-  int statusCharW = 12 * statusScale;
-  int maxChars = (maxGroupW - iconW - gap) / statusCharW;
+  // Pick the largest scale that fits; fall back gracefully.
+  uint8_t statusScale = 3;
+  if (scaledSans24TextWidthPx(status, 3) > statusMaxW) statusScale = 2;
+  if (scaledSans24TextWidthPx(status, 2) > statusMaxW) statusScale = 1;
+
+  // Truncate if even scale 1 is too wide
+  int maxChars = statusMaxW / (12 * statusScale);
   if (maxChars < 1) maxChars = 1;
   if ((int)status.length() > maxChars) {
     if (maxChars > 3) {
@@ -449,41 +454,46 @@ static void showStatusScreen(const String &nameIn,
   int groupX = (EPD_W - groupW) / 2;
   if (groupX < margin) groupX = margin;
 
-  int statusY = (statusScale == 2) ? 86 : 98; // align 48px scaled text
-  int iconY   = statusY - 8; // align check with word visually
+  int statusY = 40;
+  int iconY   = 40;
   int wordX   = groupX + iconW + gap;
 
   drawStatusIcon(state, groupX, iconY, iconW, iconH);
   drawSans24ScaledString(wordX, statusY, status, statusScale);
 
-  // Divider and detail block (closer to web layout)
-  EPD_DrawLine(margin, 156, EPD_W - margin, 156, BLACK);
+  // Divider
+  EPD_DrawLine(margin, 124, EPD_W - margin, 124, BLACK);
 
   String detailLine = detail;
   String untilLine = formatUntil(untilIn, sourceIn);
   String nextLine = formatNextEvent(nextEventIn);
   String lines[3] = { detailLine, untilLine, nextLine };
 
+  // Detail lines: sans-serif scale 1 (24px), 30px line spacing
   int detailMaxW = EPD_W - margin * 2;
   for (int i = 0; i < 3; i++) {
-    lines[i] = ellipsizeToFit(lines[i], 16, detailMaxW);
+    lines[i] = ellipsizeToFit(lines[i], 24, detailMaxW);
   }
-
-  drawCenteredLines(168, lines, 3, 16, 6);
+  for (int i = 0; i < 3; i++) {
+    if (!lines[i].length()) continue;
+    int lw = scaledSans24TextWidthPx(lines[i], 1);
+    int lx = (EPD_W - lw) / 2;
+    if (lx < 0) lx = 0;
+    drawSans24ScaledString(lx, 136 + i * 30, lines[i], 1);
+  }
 
   if (sourceIn == "working_hours") {
-    EPD_DrawLine(margin, 222, EPD_W - margin, 222, BLACK);
+    EPD_DrawLine(margin, 226, EPD_W - margin, 226, BLACK);
   }
 
-  // Bottom-right timestamp
+  // Bottom-right timestamp (sans-serif scale 1 = 24px)
   String ts = formatLocalTimestamp();
   if (ts.length()) {
-    uint16_t tsFont = 16;
-    int tsW = textWidthPx(ts, tsFont);
+    int tsW = scaledSans24TextWidthPx(ts, 1);
     int tsX = EPD_W - margin - tsW;
-    int tsY = EPD_H - margin - tsFont;
+    int tsY = EPD_H - margin - 24;
     if (tsX < margin) tsX = margin;
-    EPD_ShowString((uint16_t)tsX, (uint16_t)tsY, (char*)ts.c_str(), tsFont, BLACK);
+    drawSans24ScaledString(tsX, tsY, ts, 1);
   }
 
   EPD_Display(ImageBW);
