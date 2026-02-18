@@ -257,6 +257,13 @@ static void drawBoldString(int x, int y, const String& s, uint16_t size) {
   EPD_ShowString((uint16_t)(x + 1), (uint16_t)y, (char*)s.c_str(), size, BLACK);
 }
 
+static bool isMicActiveStatus(const String &statusIn) {
+  String lowered = statusIn;
+  lowered.toLowerCase();
+  lowered.trim();
+  return lowered == "mic active" || lowered == "mic_active";
+}
+
 static int scaledSans24TextWidthPx(const String &s, uint8_t scale) {
   return (int)s.length() * 12 * (int)scale;
 }
@@ -457,25 +464,27 @@ static void showStatusScreen(const String &nameIn,
   String state  = stateIn;
   String status = statusIn;
   String detail = detailIn;
+  bool micActive = isMicActiveStatus(statusIn);
 
   // Make status read like the photo
   status.toUpperCase();
+  name.toUpperCase();
 
   // New image buffer
   Paint_NewImage(ImageBW, EPD_W, EPD_H, Rotation, WHITE);
   Paint_Clear(WHITE);
 
-  // Top name (centered, sans-serif scale 1 = 24px)
+  // Top name (centered, all caps, a bit larger/heavier)
   int nameMaxW = EPD_W - margin * 2;
   name = ellipsizeToFit(name, 24, nameMaxW);
   {
-    int nw = scaledSans24TextWidthPx(name, 1);
+    int nw = textWidthPx(name, 24);
     int nx = (EPD_W - nw) / 2;
     if (nx < 0) nx = 0;
-    drawSans24ScaledString(nx, 8, name, 1);
+    drawBoldString(nx, 8, name, 24);
   }
 
-  // Big status + icon — native 56px smooth font, no upscaling.
+  // Big status + icon.
   const int iconW = 72;
   const int iconH = 72;
   const int gap   = 16;
@@ -484,25 +493,25 @@ static void showStatusScreen(const String &nameIn,
   int statusMaxW = maxGroupW - iconW - gap;
 
   // Truncate if status word is wider than available space.
-  int maxChars = statusMaxW / 36;  // smooth_5636 is 36px per char
+  int maxChars = statusMaxW / 24;  // EPD 48px font advances 24px per char
   if (maxChars < 1) maxChars = 1;
   if ((int)status.length() > maxChars) {
     if (maxChars > 3) status = status.substring(0, maxChars - 3) + "...";
     else              status = status.substring(0, maxChars);
   }
-  int statusW = sans56TextWidthPx(status);
+  int statusW = textWidthPx(status, 48);
 
   int groupW = iconW + gap + statusW;
   int groupX = (EPD_W - groupW) / 2;
   if (groupX < margin) groupX = margin;
 
-  // Vertically centre the 56px text within the 72px icon box.
-  int statusY = 40 + (iconH - 56) / 2;   // = 40 + 8 = 48
+  // Vertically centre the 48px text within the 72px icon box.
+  int statusY = 40 + (iconH - 48) / 2;
   int iconY   = 40;
   int wordX   = groupX + iconW + gap;
 
   drawStatusIcon(state, groupX, iconY, iconW, iconH);
-  drawSans56String(wordX, statusY, status);
+  drawBoldString(wordX, statusY, status, 48);
 
   // Divider
   EPD_DrawLine(margin, 124, EPD_W - margin, 124, BLACK);
@@ -514,15 +523,18 @@ static void showStatusScreen(const String &nameIn,
 
   // Detail lines: sans-serif scale 1 (24px), 30px line spacing
   int detailMaxW = EPD_W - margin * 2;
+  if (micActive) {
+    lines[1] = "";
+  }
   for (int i = 0; i < 3; i++) {
     lines[i] = ellipsizeToFit(lines[i], 24, detailMaxW);
   }
   for (int i = 0; i < 3; i++) {
     if (!lines[i].length()) continue;
-    int lw = scaledSans24TextWidthPx(lines[i], 1);
+    int lw = textWidthPx(lines[i], 24);
     int lx = (EPD_W - lw) / 2;
     if (lx < 0) lx = 0;
-    drawSans24ScaledString(lx, 136 + i * 30, lines[i], 1);
+    EPD_ShowString((uint16_t)lx, (uint16_t)(136 + i * 30), (char*)lines[i].c_str(), 24, BLACK);
   }
 
   if (sourceIn == "working_hours") {
@@ -532,11 +544,11 @@ static void showStatusScreen(const String &nameIn,
   // Bottom-right timestamp (sans-serif scale 1 = 24px)
   String ts = formatLocalTimestamp();
   if (ts.length()) {
-    int tsW = scaledSans24TextWidthPx(ts, 1);
+    int tsW = textWidthPx(ts, 24);
     int tsX = EPD_W - margin - tsW;
     int tsY = EPD_H - margin - 24;
     if (tsX < margin) tsX = margin;
-    drawSans24ScaledString(tsX, tsY, ts, 1);
+    EPD_ShowString((uint16_t)tsX, (uint16_t)tsY, (char*)ts.c_str(), 24, BLACK);
   }
 
   EPD_Display(ImageBW);
