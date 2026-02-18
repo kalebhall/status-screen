@@ -261,6 +261,16 @@ static String ellipsizeSans56ToFit(String s, int tracking, int maxWidthPx) {
   }
   return s + dots;
 }
+static bool isMicActiveStatus(const String &statusIn) {
+  String lowered = statusIn;
+  lowered.toLowerCase();
+  lowered.trim();
+  return lowered == "mic active" || lowered == "mic_active";
+}
+
+static int scaledSans24TextWidthPx(const String &s, uint8_t scale) {
+  return (int)s.length() * 12 * (int)scale;
+}
 
 static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale, int tracking = 0, bool bold = false) {
   if (scale < 1) scale = 1;
