@@ -26,6 +26,7 @@
 // Elecrow e-paper driver headers
 #include "EPD.h"   // provides EPD_* and Paint_* in this stack
 #include "EPDfont.h"
+#include "custom_fonts.h"  // smooth TTF-rendered sans-serif bitmaps
 
 // -------------------- USER CONFIG --------------------
 static const char *WIFI_SSID = "YOUR_WIFI_SSID";
@@ -275,7 +276,7 @@ static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale)
     uint16_t py = 0;
 
     for (uint16_t i = 0; i < 36; i++) {
-      uint8_t temp = ascii_2412[idx][i];
+      uint8_t temp = smooth_2412[idx][i];
       for (uint8_t bit = 0; bit < 8; bit++) {
         if (temp & 0x01) {
           int bx = cursorX + px * scale;
@@ -299,6 +300,50 @@ static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale)
   }
 }
 
+// Native 56px-tall sans-serif font (smooth_5636: 36px wide x 56px tall).
+// Used for the big status word — rendered directly from TTF, no upscaling.
+static int sans56TextWidthPx(const String &s) {
+  return (int)s.length() * 36;
+}
+
+static void drawSans56String(int x, int y, const String &s) {
+  const int CELL_W = 36;
+  const int STRIPES = 7; // 56 / 8
+  int cx = x;
+  for (size_t ci = 0; ci < s.length(); ci++) {
+    char c = s[ci];
+    if (c < ' ' || c > '~') { cx += CELL_W; continue; }
+    int idx = (uint8_t)c - ' ';
+    for (int stripe = 0; stripe < STRIPES; stripe++) {
+      for (int col = 0; col < CELL_W; col++) {
+        uint8_t b = smooth_5636[idx][stripe * CELL_W + col];
+        for (int bit = 0; bit < 8; bit++) {
+          if (b & (1 << bit)) {
+            Paint_SetPixel(cx + col, y + stripe * 8 + bit, BLACK);
+          }
+        }
+      }
+    }
+    cx += CELL_W;
+  }
+}
+
+// Thick line helper used by all status icons (square brush of radius r).
+static void thickLine(int ax, int ay, int bx, int by, int r = 2) {
+  int dx = abs(bx - ax), sx = ax < bx ? 1 : -1;
+  int dy = -abs(by - ay), sy = ay < by ? 1 : -1;
+  int err = dx + dy;
+  while (true) {
+    for (int tx = -r; tx <= r; tx++)
+      for (int ty = -r; ty <= r; ty++)
+        Paint_SetPixel(ax + tx, ay + ty, BLACK);
+    if (ax == bx && ay == by) break;
+    int e2 = 2 * err;
+    if (e2 >= dy) { err += dy; ax += sx; }
+    if (e2 <= dx) { err += dx; ay += sy; }
+  }
+}
+
 static void drawCheckmark(int x, int y, int w, int h, int thickness);
 
 static void drawCircle(int cx, int cy, int r, int thickness = 2) {
@@ -317,41 +362,46 @@ static void drawStatusIcon(const String& state, int x, int y, int w, int h) {
   s.toLowerCase();
 
   if (s == "available") {
-    drawCheckmark(x, y, w, h, 2);
+    drawCheckmark(x, y, w, h, 3);
     return;
   }
 
   if (s == "busy") {
-    drawCircle(x + w / 2, y + h / 2, min(w, h) / 2 - 3, 2);
-    for (int i = 0; i < 3; i++) {
-      EPD_DrawLine(x + 10 + i, y + h - 10, x + w - 10 + i, y + 10, BLACK);
-    }
+    drawCircle(x + w / 2, y + h / 2, min(w, h) / 2 - 3, 3);
+    thickLine(x + 14, y + h - 14, x + w - 14, y + 14, 2);
     return;
   }
 
   if (s == "meeting") {
+    // Calendar box — three nested rectangles for a thick border
     EPD_DrawRectangle(x + 4, y + 10, x + w - 4, y + h - 6, BLACK, 0);
-    EPD_DrawLine(x + 4, y + 20, x + w - 4, y + 20, BLACK);
-    EPD_DrawLine(x + 14, y + 6, x + 14, y + 16, BLACK);
-    EPD_DrawLine(x + w - 14, y + 6, x + w - 14, y + 16, BLACK);
+    EPD_DrawRectangle(x + 5, y + 11, x + w - 5, y + h - 7, BLACK, 0);
+    EPD_DrawRectangle(x + 6, y + 12, x + w - 6, y + h - 8, BLACK, 0);
+    // Header divider (horizontal)
+    thickLine(x + 6, y + 22, x + w - 6, y + 22, 2);
+    // Tab pegs (vertical, above top edge)
+    thickLine(x + 16, y + 5, x + 16, y + 16, 2);
+    thickLine(x + w - 16, y + 5, x + w - 16, y + 16, 2);
     return;
   }
 
   if (s == "ooo") {
-    // Airplane-ish icon.
-    EPD_DrawLine(x + 8, y + h - 14, x + w - 8, y + 12, BLACK);
-    EPD_DrawLine(x + w - 18, y + 22, x + w - 8, y + 12, BLACK);
-    EPD_DrawLine(x + w - 24, y + 18, x + w - 16, y + 30, BLACK);
-    EPD_DrawLine(x + 18, y + h - 12, x + 28, y + h - 2, BLACK);
+    // Airplane-ish icon — thick strokes
+    thickLine(x + 8, y + h - 14, x + w - 8, y + 12, 2);
+    thickLine(x + w - 18, y + 22, x + w - 8, y + 12, 2);
+    thickLine(x + w - 24, y + 18, x + w - 16, y + 30, 2);
+    thickLine(x + 18, y + h - 12, x + 28, y + h - 2, 2);
     return;
   }
 
-  // Error / unknown: warning triangle.
-  EPD_DrawLine(x + w / 2, y + 8, x + 8, y + h - 6, BLACK);
-  EPD_DrawLine(x + 8, y + h - 6, x + w - 8, y + h - 6, BLACK);
-  EPD_DrawLine(x + w - 8, y + h - 6, x + w / 2, y + 8, BLACK);
-  EPD_DrawLine(x + w / 2, y + 18, x + w / 2, y + h - 16, BLACK);
-  Paint_SetPixel(x + w / 2, y + h - 11, BLACK);
+  // Error / unknown: warning triangle — thick strokes
+  thickLine(x + w / 2, y + 8, x + 8, y + h - 6, 2);
+  thickLine(x + 8, y + h - 6, x + w - 8, y + h - 6, 2);
+  thickLine(x + w - 8, y + h - 6, x + w / 2, y + 8, 2);
+  thickLine(x + w / 2, y + 20, x + w / 2, y + h - 16, 2);
+  for (int d = -2; d <= 2; d++)
+    for (int e = -2; e <= 2; e++)
+      Paint_SetPixel(x + w / 2 + d, y + h - 10 + e, BLACK);
 }
 
 static void drawCenteredLines(int yStart, String lines[], int lineCount, uint16_t fontSize, int lineGap) {
@@ -425,41 +475,34 @@ static void showStatusScreen(const String &nameIn,
     drawSans24ScaledString(nx, 8, name, 1);
   }
 
-  // Big status + icon as a centered group (sans-serif; prefer scale 3 = 72px tall).
-  int iconW = 72;
-  int iconH = 72;
-  int gap   = 16;
+  // Big status + icon — native 56px smooth font, no upscaling.
+  const int iconW = 72;
+  const int iconH = 72;
+  const int gap   = 16;
 
-  int maxGroupW = EPD_W - margin * 2;
+  int maxGroupW  = EPD_W - margin * 2;
   int statusMaxW = maxGroupW - iconW - gap;
 
-  // Pick the largest scale that fits; fall back gracefully.
-  uint8_t statusScale = 3;
-  if (scaledSans24TextWidthPx(status, 3) > statusMaxW) statusScale = 2;
-  if (scaledSans24TextWidthPx(status, 2) > statusMaxW) statusScale = 1;
-
-  // Truncate if even scale 1 is too wide
-  int maxChars = statusMaxW / (12 * statusScale);
+  // Truncate if status word is wider than available space.
+  int maxChars = statusMaxW / 36;  // smooth_5636 is 36px per char
   if (maxChars < 1) maxChars = 1;
   if ((int)status.length() > maxChars) {
-    if (maxChars > 3) {
-      status = status.substring(0, maxChars - 3) + "...";
-    } else {
-      status = status.substring(0, maxChars);
-    }
+    if (maxChars > 3) status = status.substring(0, maxChars - 3) + "...";
+    else              status = status.substring(0, maxChars);
   }
-  int statusW = scaledSans24TextWidthPx(status, statusScale);
+  int statusW = sans56TextWidthPx(status);
 
   int groupW = iconW + gap + statusW;
   int groupX = (EPD_W - groupW) / 2;
   if (groupX < margin) groupX = margin;
 
-  int statusY = 40;
+  // Vertically centre the 56px text within the 72px icon box.
+  int statusY = 40 + (iconH - 56) / 2;   // = 40 + 8 = 48
   int iconY   = 40;
   int wordX   = groupX + iconW + gap;
 
   drawStatusIcon(state, groupX, iconY, iconW, iconH);
-  drawSans24ScaledString(wordX, statusY, status, statusScale);
+  drawSans56String(wordX, statusY, status);
 
   // Divider
   EPD_DrawLine(margin, 124, EPD_W - margin, 124, BLACK);
