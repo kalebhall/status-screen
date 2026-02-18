@@ -25,7 +25,6 @@
 
 // Elecrow e-paper driver headers
 #include "EPD.h"   // provides EPD_* and Paint_* in this stack
-#include "EPDfont.h"
 #include "custom_fonts.h"  // smooth TTF-rendered sans-serif bitmaps
 
 // -------------------- USER CONFIG --------------------
@@ -221,53 +220,55 @@ static String formatUntil(const String& iso, const String& source) {
 }
 
 // -------------------- DRAWING HELPERS --------------------
-// Your EPD_ShowString advances x by (size/2) per char (monospace-ish)
-static int textWidthPx(const String &s, uint16_t fontSize) {
-  return (int)s.length() * (int)(fontSize / 2);
+
+static bool isMicActiveStatus(const String &statusIn) {
+  String lowered = statusIn;
+  lowered.toLowerCase();
+  lowered.trim();
+  return lowered == "mic active" || lowered == "mic_active";
 }
 
-static String ellipsizeToFit(String s, uint16_t fontSize, int maxWidthPx) {
-  if (textWidthPx(s, fontSize) <= maxWidthPx) return s;
+static inline void setPixelSafe(int x, int y) {
+  if (x >= 0 && x < EPD_W && y >= 0 && y < EPD_H) {
+    Paint_SetPixel(x, y, BLACK);
+  }
+}
+
+static int scaledSans24TextWidthPx(const String &s, uint8_t scale, int tracking = 0) {
+  if (!s.length()) return 0;
+  return (int)s.length() * 12 * (int)scale + ((int)s.length() - 1) * tracking;
+}
+
+static int sans56TextWidthPx(const String &s, int tracking = 0) {
+  if (!s.length()) return 0;
+  return (int)s.length() * 36 + ((int)s.length() - 1) * tracking;
+}
+
+static String ellipsizeSans24ToFit(String s, uint8_t scale, int tracking, int maxWidthPx) {
+  if (scaledSans24TextWidthPx(s, scale, tracking) <= maxWidthPx) return s;
   const String dots = "...";
-  while (s.length() > 0 && textWidthPx(s + dots, fontSize) > maxWidthPx) {
+  while (s.length() > 0 && scaledSans24TextWidthPx(s + dots, scale, tracking) > maxWidthPx) {
     s.remove(s.length() - 1);
   }
   return s + dots;
 }
 
-static uint16_t pickFontToFit(const String &s, int maxWidthPx, uint16_t preferred) {
-  // allowed sizes in your EPD_ShowChar: 12, 16, 24, 48
-  const uint16_t sizes[] = { preferred, 24, 16, 12 };
-  for (uint16_t sz : sizes) {
-    if (textWidthPx(s, sz) <= maxWidthPx) return sz;
+static String ellipsizeSans56ToFit(String s, int tracking, int maxWidthPx) {
+  if (sans56TextWidthPx(s, tracking) <= maxWidthPx) return s;
+  const String dots = "...";
+  while (s.length() > 0 && sans56TextWidthPx(s + dots, tracking) > maxWidthPx) {
+    s.remove(s.length() - 1);
   }
-  return 12;
+  return s + dots;
 }
 
-static void drawCenteredText(int y, const String &s, uint16_t fontSize) {
-  int w = textWidthPx(s, fontSize);
-  int x = (EPD_W - w) / 2;
-  if (x < 0) x = 0;
-  EPD_ShowString((uint16_t)x, (uint16_t)y, (char*)s.c_str(), fontSize, BLACK);
-}
-
-static void drawBoldString(int x, int y, const String& s, uint16_t size) {
-  // Faux bold: draw twice with a 1px offset. Looks cleaner than 48px glyphs on many panels.
-  EPD_ShowString((uint16_t)x, (uint16_t)y, (char*)s.c_str(), size, BLACK);
-  EPD_ShowString((uint16_t)(x + 1), (uint16_t)y, (char*)s.c_str(), size, BLACK);
-}
-
-static int scaledSans24TextWidthPx(const String &s, uint8_t scale) {
-  return (int)s.length() * 12 * (int)scale;
-}
-
-static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale) {
+static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale, int tracking = 0, bool bold = false) {
   if (scale < 1) scale = 1;
   int cursorX = x;
   for (size_t ci = 0; ci < s.length(); ci++) {
     char c = s[ci];
     if (c < ' ' || c > '~') {
-      cursorX += 12 * scale;
+      cursorX += (12 * scale) + tracking;
       continue;
     }
 
@@ -283,7 +284,8 @@ static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale)
           int by = y + (py + bit) * scale;
           for (uint8_t sx = 0; sx < scale; sx++) {
             for (uint8_t sy = 0; sy < scale; sy++) {
-              Paint_SetPixel(bx + sx, by + sy, BLACK);
+              setPixelSafe(bx + sx, by + sy);
+              if (bold) setPixelSafe(bx + sx + 1, by + sy);
             }
           }
         }
@@ -296,35 +298,32 @@ static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale)
       }
     }
 
-    cursorX += 12 * scale;
+    cursorX += (12 * scale) + tracking;
   }
 }
 
 // Native 56px-tall sans-serif font (smooth_5636: 36px wide x 56px tall).
 // Used for the big status word — rendered directly from TTF, no upscaling.
-static int sans56TextWidthPx(const String &s) {
-  return (int)s.length() * 36;
-}
-
-static void drawSans56String(int x, int y, const String &s) {
+static void drawSans56String(int x, int y, const String &s, int tracking = -3, bool bold = true) {
   const int CELL_W = 36;
   const int STRIPES = 7; // 56 / 8
   int cx = x;
   for (size_t ci = 0; ci < s.length(); ci++) {
     char c = s[ci];
-    if (c < ' ' || c > '~') { cx += CELL_W; continue; }
+    if (c < ' ' || c > '~') { cx += CELL_W + tracking; continue; }
     int idx = (uint8_t)c - ' ';
     for (int stripe = 0; stripe < STRIPES; stripe++) {
       for (int col = 0; col < CELL_W; col++) {
         uint8_t b = smooth_5636[idx][stripe * CELL_W + col];
         for (int bit = 0; bit < 8; bit++) {
           if (b & (1 << bit)) {
-            Paint_SetPixel(cx + col, y + stripe * 8 + bit, BLACK);
+            setPixelSafe(cx + col, y + stripe * 8 + bit);
+            if (bold) setPixelSafe(cx + col + 1, y + stripe * 8 + bit);
           }
         }
       }
     }
-    cx += CELL_W;
+    cx += CELL_W + tracking;
   }
 }
 
@@ -404,13 +403,6 @@ static void drawStatusIcon(const String& state, int x, int y, int w, int h) {
       Paint_SetPixel(x + w / 2 + d, y + h - 10 + e, BLACK);
 }
 
-static void drawCenteredLines(int yStart, String lines[], int lineCount, uint16_t fontSize, int lineGap) {
-  for (int i = 0; i < lineCount; i++) {
-    if (!lines[i].length()) continue;
-    drawCenteredText(yStart + i * (fontSize + lineGap), lines[i], fontSize);
-  }
-}
-
 // Pixel-drawn checkmark
 static void drawCheckmark(int x, int y, int w, int h, int thickness) {
   int x1 = x + (w * 20) / 100;
@@ -457,25 +449,33 @@ static void showStatusScreen(const String &nameIn,
   String state  = stateIn;
   String status = statusIn;
   String detail = detailIn;
+  bool micActive = isMicActiveStatus(statusIn);
 
   // Make status read like the photo
   status.toUpperCase();
+  name.toUpperCase();
 
   // New image buffer
   Paint_NewImage(ImageBW, EPD_W, EPD_H, Rotation, WHITE);
   Paint_Clear(WHITE);
 
-  // Top name (centered, sans-serif scale 1 = 24px)
+  // Top name (centered, all caps, a bit larger/heavier)
   int nameMaxW = EPD_W - margin * 2;
-  name = ellipsizeToFit(name, 24, nameMaxW);
+  uint8_t nameScale = 2;
+  int nameTracking = 1;
+  if (scaledSans24TextWidthPx(name, nameScale, nameTracking) > nameMaxW) {
+    nameScale = 1;
+    nameTracking = 0;
+  }
+  name = ellipsizeSans24ToFit(name, nameScale, nameTracking, nameMaxW);
   {
-    int nw = scaledSans24TextWidthPx(name, 1);
+    int nw = scaledSans24TextWidthPx(name, nameScale, nameTracking);
     int nx = (EPD_W - nw) / 2;
     if (nx < 0) nx = 0;
-    drawSans24ScaledString(nx, 8, name, 1);
+    drawSans24ScaledString(nx, 6, name, nameScale, nameTracking, true);
   }
 
-  // Big status + icon — native 56px smooth font, no upscaling.
+  // Big status + icon.
   const int iconW = 72;
   const int iconH = 72;
   const int gap   = 16;
@@ -484,25 +484,21 @@ static void showStatusScreen(const String &nameIn,
   int statusMaxW = maxGroupW - iconW - gap;
 
   // Truncate if status word is wider than available space.
-  int maxChars = statusMaxW / 36;  // smooth_5636 is 36px per char
-  if (maxChars < 1) maxChars = 1;
-  if ((int)status.length() > maxChars) {
-    if (maxChars > 3) status = status.substring(0, maxChars - 3) + "...";
-    else              status = status.substring(0, maxChars);
-  }
-  int statusW = sans56TextWidthPx(status);
+  const int statusTracking = -3;
+  status = ellipsizeSans56ToFit(status, statusTracking, statusMaxW);
+  int statusW = sans56TextWidthPx(status, statusTracking);
 
   int groupW = iconW + gap + statusW;
   int groupX = (EPD_W - groupW) / 2;
   if (groupX < margin) groupX = margin;
 
   // Vertically centre the 56px text within the 72px icon box.
-  int statusY = 40 + (iconH - 56) / 2;   // = 40 + 8 = 48
+  int statusY = 40 + (iconH - 56) / 2;
   int iconY   = 40;
   int wordX   = groupX + iconW + gap;
 
   drawStatusIcon(state, groupX, iconY, iconW, iconH);
-  drawSans56String(wordX, statusY, status);
+  drawSans56String(wordX, statusY, status, statusTracking, true);
 
   // Divider
   EPD_DrawLine(margin, 124, EPD_W - margin, 124, BLACK);
@@ -514,29 +510,33 @@ static void showStatusScreen(const String &nameIn,
 
   // Detail lines: sans-serif scale 1 (24px), 30px line spacing
   int detailMaxW = EPD_W - margin * 2;
+  if (micActive) {
+    lines[1] = "";
+  }
+  const int detailTracking = -1;
   for (int i = 0; i < 3; i++) {
-    lines[i] = ellipsizeToFit(lines[i], 24, detailMaxW);
+    lines[i] = ellipsizeSans24ToFit(lines[i], 1, detailTracking, detailMaxW);
   }
   for (int i = 0; i < 3; i++) {
     if (!lines[i].length()) continue;
-    int lw = scaledSans24TextWidthPx(lines[i], 1);
+    int lw = scaledSans24TextWidthPx(lines[i], 1, detailTracking);
     int lx = (EPD_W - lw) / 2;
     if (lx < 0) lx = 0;
-    drawSans24ScaledString(lx, 136 + i * 30, lines[i], 1);
+    drawSans24ScaledString(lx, 136 + i * 30, lines[i], 1, detailTracking, false);
   }
 
   if (sourceIn == "working_hours") {
     EPD_DrawLine(margin, 226, EPD_W - margin, 226, BLACK);
   }
 
-  // Bottom-right timestamp (sans-serif scale 1 = 24px)
+  // Bottom-right timestamp (custom 24px sans)
   String ts = formatLocalTimestamp();
   if (ts.length()) {
-    int tsW = scaledSans24TextWidthPx(ts, 1);
+    int tsW = scaledSans24TextWidthPx(ts, 1, detailTracking);
     int tsX = EPD_W - margin - tsW;
     int tsY = EPD_H - margin - 24;
     if (tsX < margin) tsX = margin;
-    drawSans24ScaledString(tsX, tsY, ts, 1);
+    drawSans24ScaledString(tsX, tsY, ts, 1, detailTracking, false);
   }
 
   EPD_Display(ImageBW);
