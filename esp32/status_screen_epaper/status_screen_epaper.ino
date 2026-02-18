@@ -140,6 +140,83 @@ static String formatNextEvent(const String& iso) {
   return String(buf);
 }
 
+static bool parseIsoToEpoch(const String& iso, time_t &epochOut) {
+  // Accepts offsets like ±HH:MM and Z.
+  if (iso.length() < 19) return false;
+
+  int year = iso.substring(0, 4).toInt();
+  int month = iso.substring(5, 7).toInt();
+  int day = iso.substring(8, 10).toInt();
+  int hour = iso.substring(11, 13).toInt();
+  int minute = iso.substring(14, 16).toInt();
+  int second = iso.substring(17, 19).toInt();
+
+  struct tm tmUtc = {};
+  tmUtc.tm_year = year - 1900;
+  tmUtc.tm_mon = month - 1;
+  tmUtc.tm_mday = day;
+  tmUtc.tm_hour = hour;
+  tmUtc.tm_min = minute;
+  tmUtc.tm_sec = second;
+
+  time_t utc = mktime(&tmUtc);
+  if (utc <= 0) return false;
+
+  if (iso.length() >= 20 && iso[19] == 'Z') {
+    epochOut = utc;
+    return true;
+  }
+
+  if (iso.length() >= 25) {
+    char sign = iso[19];
+    int offH = iso.substring(20, 22).toInt();
+    int offM = iso.substring(23, 25).toInt();
+    int offset = (offH * 3600) + (offM * 60);
+    if (sign == '+') {
+      utc -= offset;
+    } else if (sign == '-') {
+      utc += offset;
+    }
+    epochOut = utc;
+    return true;
+  }
+
+  return false;
+}
+
+static String formatUntil(const String& iso, const String& source) {
+  time_t eventEpoch = 0;
+  if (!parseIsoToEpoch(iso, eventEpoch)) return "";
+
+  time_t nowEpoch = time(nullptr);
+  long seconds = (long)difftime(eventEpoch, nowEpoch);
+  if (seconds <= 0) return "";
+
+  if (source == "working_hours") {
+    struct tm local;
+    localtime_r(&eventEpoch, &local);
+    int h12 = local.tm_hour % 12;
+    if (h12 == 0) h12 = 12;
+    const char *ampm = (local.tm_hour >= 12) ? "PM" : "AM";
+    char buf[36];
+    snprintf(buf, sizeof(buf), "Back at %d:%02d %s", h12, local.tm_min, ampm);
+    return String(buf);
+  }
+
+  long hours = seconds / 3600;
+  long minutes = (seconds % 3600) / 60;
+  long remSec = seconds % 60;
+  char buf[32];
+  if (hours > 0) {
+    snprintf(buf, sizeof(buf), "Ends in %ldh %ldm", hours, minutes);
+  } else if (minutes > 0) {
+    snprintf(buf, sizeof(buf), "Ends in %ldm %lds", minutes, remSec);
+  } else {
+    snprintf(buf, sizeof(buf), "Ends in %lds", remSec);
+  }
+  return String(buf);
+}
+
 // -------------------- DRAWING HELPERS --------------------
 // Your EPD_ShowString advances x by (size/2) per char (monospace-ish)
 static int textWidthPx(const String &s, uint16_t fontSize) {
@@ -177,8 +254,70 @@ static void drawBoldString(int x, int y, const String& s, uint16_t size) {
   EPD_ShowString((uint16_t)(x + 1), (uint16_t)y, (char*)s.c_str(), size, BLACK);
 }
 
+static void drawCheckmark(int x, int y, int w, int h, int thickness);
+
+static void drawCircle(int cx, int cy, int r, int thickness = 2) {
+  for (int deg = 0; deg < 360; deg++) {
+    float rad = deg * 0.0174533f;
+    for (int t = -thickness; t <= thickness; t++) {
+      int x = cx + (int)((r + t) * cos(rad));
+      int y = cy + (int)((r + t) * sin(rad));
+      Paint_SetPixel(x, y, BLACK);
+    }
+  }
+}
+
+static void drawStatusIcon(const String& state, int x, int y, int w, int h) {
+  String s = state;
+  s.toLowerCase();
+
+  if (s == "available") {
+    drawCheckmark(x, y, w, h, 2);
+    return;
+  }
+
+  if (s == "busy") {
+    drawCircle(x + w / 2, y + h / 2, min(w, h) / 2 - 3, 2);
+    for (int i = 0; i < 3; i++) {
+      EPD_DrawLine(x + 10 + i, y + h - 10, x + w - 10 + i, y + 10, BLACK);
+    }
+    return;
+  }
+
+  if (s == "meeting") {
+    EPD_DrawRectangle(x + 4, y + 10, x + w - 4, y + h - 6, BLACK, 0);
+    EPD_DrawLine(x + 4, y + 20, x + w - 4, y + 20, BLACK);
+    EPD_DrawLine(x + 14, y + 6, x + 14, y + 16, BLACK);
+    EPD_DrawLine(x + w - 14, y + 6, x + w - 14, y + 16, BLACK);
+    return;
+  }
+
+  if (s == "ooo") {
+    // Airplane-ish icon.
+    EPD_DrawLine(x + 8, y + h - 14, x + w - 8, y + 12, BLACK);
+    EPD_DrawLine(x + w - 18, y + 22, x + w - 8, y + 12, BLACK);
+    EPD_DrawLine(x + w - 24, y + 18, x + w - 16, y + 30, BLACK);
+    EPD_DrawLine(x + 18, y + h - 12, x + 28, y + h - 2, BLACK);
+    return;
+  }
+
+  // Error / unknown: warning triangle.
+  EPD_DrawLine(x + w / 2, y + 8, x + 8, y + h - 6, BLACK);
+  EPD_DrawLine(x + 8, y + h - 6, x + w - 8, y + h - 6, BLACK);
+  EPD_DrawLine(x + w - 8, y + h - 6, x + w / 2, y + 8, BLACK);
+  EPD_DrawLine(x + w / 2, y + 18, x + w / 2, y + h - 16, BLACK);
+  Paint_SetPixel(x + w / 2, y + h - 11, BLACK);
+}
+
+static void drawCenteredLines(int yStart, String lines[], int lineCount, uint16_t fontSize, int lineGap) {
+  for (int i = 0; i < lineCount; i++) {
+    if (!lines[i].length()) continue;
+    drawCenteredText(yStart + i * (fontSize + lineGap), lines[i], fontSize);
+  }
+}
+
 // Pixel-drawn checkmark
-static void drawCheckmark(int x, int y, int w, int h, int thickness = 2) {
+static void drawCheckmark(int x, int y, int w, int h, int thickness) {
   int x1 = x + (w * 20) / 100;
   int y1 = y + (h * 55) / 100;
   int x2 = x + (w * 40) / 100;
@@ -210,11 +349,16 @@ static void drawCheckmark(int x, int y, int w, int h, int thickness = 2) {
 
 // -------------------- MAIN STATUS SCREEN --------------------
 static void showStatusScreen(const String &nameIn,
+                             const String &stateIn,
                              const String &statusIn,
-                             const String &detailIn) {
+                             const String &detailIn,
+                             const String &untilIn,
+                             const String &sourceIn,
+                             const String &nextEventIn) {
   const int margin = 14;
 
   String name   = nameIn;
+  String state  = stateIn;
   String status = statusIn;
   String detail = detailIn;
 
@@ -253,14 +397,27 @@ static void showStatusScreen(const String &nameIn,
   int iconY   = statusY - 8; // align check with word visually
   int wordX   = groupX + iconW + gap;
 
-  drawCheckmark(groupX, iconY, iconW, iconH, 2);
+  drawStatusIcon(state, groupX, iconY, iconW, iconH);
   drawBoldString(wordX, statusY, status, statusFont);
 
-  // Detail line (centered)
+  // Divider and detail block (closer to web layout)
+  EPD_DrawLine(margin, 156, EPD_W - margin, 156, BLACK);
+
+  String detailLine = detail;
+  String untilLine = formatUntil(untilIn, sourceIn);
+  String nextLine = formatNextEvent(nextEventIn);
+  String lines[3] = { detailLine, untilLine, nextLine };
+
   int detailMaxW = EPD_W - margin * 2;
-  uint16_t detailFont = pickFontToFit(detail, detailMaxW, 24);
-  detail = ellipsizeToFit(detail, detailFont, detailMaxW);
-  drawCenteredText(168, detail, detailFont);
+  for (int i = 0; i < 3; i++) {
+    lines[i] = ellipsizeToFit(lines[i], 16, detailMaxW);
+  }
+
+  drawCenteredLines(168, lines, 3, 16, 6);
+
+  if (sourceIn == "working_hours") {
+    EPD_DrawLine(margin, 222, EPD_W - margin, 222, BLACK);
+  }
 
   // Bottom-right timestamp
   String ts = formatLocalTimestamp();
@@ -279,7 +436,7 @@ static void showStatusScreen(const String &nameIn,
 
 static void showStatusSplash(const String &line1, const String &line2) {
   // Use the same status layout for splash screens
-  showStatusScreen(line1, line2, "");
+  showStatusScreen(line1, "error", line2, "", "", "", "");
 }
 
 // -------------------- PANEL INIT --------------------
@@ -327,7 +484,7 @@ static void handleRebootButtons() {
 static bool fetchAndMaybeUpdateDisplay() {
   if (WiFi.status() != WL_CONNECTED) {
     // Don't spam partial refreshes; show a useful offline screen.
-    showStatusScreen("WIFI OFFLINE", "OFFLINE", "MAC " + getMacString());
+    showStatusScreen("WIFI OFFLINE", "error", "OFFLINE", "MAC " + getMacString(), "", "", "");
     return false;
   }
 
@@ -337,7 +494,7 @@ static bool fetchAndMaybeUpdateDisplay() {
 
   if (code != 200) {
     http.end();
-    showStatusScreen("HTTP ERROR", "OFFLINE", String(code));
+    showStatusScreen("HTTP ERROR", "error", "OFFLINE", String(code), "", "", "");
     return false;
   }
 
@@ -348,14 +505,14 @@ static bool fetchAndMaybeUpdateDisplay() {
   StaticJsonDocument<8192> doc;
   DeserializationError err = deserializeJson(doc, payload);
   if (err) {
-    showStatusScreen("JSON ERROR", "OFFLINE", err.c_str());
+    showStatusScreen("JSON ERROR", "error", "OFFLINE", err.c_str(), "", "", "");
     return false;
   }
 
   String target = String(TARGET_PERSON);
   target.toLowerCase();
 
-  String name, label, state, detail, nextEventAt;
+  String name, label, state, detail, nextEventAt, source, until;
 
   JsonArray people = doc["people"].as<JsonArray>();
   for (JsonObject p : people) {
@@ -369,6 +526,8 @@ static bool fetchAndMaybeUpdateDisplay() {
       state       = String((const char*)(p["state"]         | ""));
       detail      = String((const char*)(p["detail"]        | ""));
       nextEventAt = String((const char*)(p["next_event_at"] | ""));
+      source      = String((const char*)(p["source"]        | ""));
+      until       = String((const char*)(p["until"]         | ""));
       break;
     }
   }
@@ -379,24 +538,22 @@ static bool fetchAndMaybeUpdateDisplay() {
     state = "";
     detail = "";
     nextEventAt = "";
+    source = "";
+    until = "";
   }
 
   // Choose what goes where:
   String topName   = name;
   String bigStatus = (state.length() ? state : label);
 
-  // Detail line: prefer detail; else format next_event_at
+  // Detail line fallback
   String detailLine = detail;
-  if (detailLine.length() == 0 && nextEventAt.length()) {
-    detailLine = formatNextEvent(nextEventAt);
-  }
-  // still nothing? fallback to label
   if (detailLine.length() == 0) {
     detailLine = label;
   }
 
   // Fingerprint what matters + current minute (so clock updates)
-  String displayKey = topName + "|" + bigStatus + "|" + detailLine + "|" + minuteKey();
+  String displayKey = topName + "|" + state + "|" + bigStatus + "|" + detailLine + "|" + until + "|" + nextEventAt + "|" + source + "|" + minuteKey();
   uint32_t fp = fnv1a32(displayKey);
 
   if (fp == lastFingerprint) {
@@ -407,7 +564,7 @@ static bool fetchAndMaybeUpdateDisplay() {
   lastFingerprint = fp;
 
   // Draw + partial update
-  showStatusScreen(topName, bigStatus, detailLine);
+  showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt);
 
   partialSinceFull++;
   Serial.printf("[EPD] Updated. partialSinceFull=%u\n", partialSinceFull);
@@ -417,7 +574,7 @@ static bool fetchAndMaybeUpdateDisplay() {
     epdFullRefreshClear();
 
     // Re-draw current content after a full clear
-    showStatusScreen(topName, bigStatus, detailLine);
+    showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt);
   }
 
   return true;
@@ -471,7 +628,7 @@ void setup() {
   } else {
     Serial.println("WiFi failed to connect.");
     // Show MAC so you can identify the device even when offline
-    showStatusScreen("WIFI FAILED", "OFFLINE", "MAC " + getMacString());
+    showStatusScreen("WIFI FAILED", "error", "OFFLINE", "MAC " + getMacString(), "", "", "");
   }
 
   // Poll immediately on boot
