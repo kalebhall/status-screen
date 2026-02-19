@@ -3,8 +3,8 @@
 
   What this sketch does:
   - Connects to Wi-Fi (with timeout)
-  - Initializes time via NTP (so we can render a timestamp)
-  - Polls STATUS_URL once per minute
+  - Renders timestamp from server-provided status.json generated time
+  - Polls STATUS_URL every 30 seconds
   - Extracts a target person's fields from JSON (name/label/state/detail/next_event_at)
   - Computes a fingerprint of what would be displayed INCLUDING the current minute (keeps clock alive)
   - ONLY updates the e-paper when the fingerprint changes
@@ -37,7 +37,7 @@ static const char *TARGET_PERSON = "alex"; // Match against the "name" field (ca
 constexpr unsigned long POLL_MS = 30UL * 1000UL;
 
 // Full refresh every N partial updates (helps reduce ghosting)
-constexpr uint8_t FULL_REFRESH_EVERY = 30;  // ~30 minutes if changing every minute
+constexpr uint8_t FULL_REFRESH_EVERY = 30;  // ~15 minutes if changing every 30s
 
 // CrowPanel buttons (per Elecrow docs; some board revs may vary)
 static const uint8_t BTN_MENU = 2; // MENU
@@ -90,19 +90,19 @@ static String getMacString() {
   return String(buf);
 }
 
-// ---- Time init (Nevada/Pacific) ----
-static void initTimePacific() {
-  // Nevada/Pacific time with DST rules
+// ---- Timezone formatting (no device NTP clock) ----
+static void initTimezonePacific() {
+  // Nevada/Pacific time with DST rules.
+  // We only use this for formatting server-provided timestamps.
   setenv("TZ", "PST8PDT,M3.2.0,M11.1.0", 1);
   tzset();
-
-  // NTP
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
 }
 
-static String formatLocalTimestamp() {
+static String formatTimestampFromEpoch(time_t epoch) {
+  if (epoch <= 0) return "";
+
   struct tm t;
-  if (!getLocalTime(&t, 50)) return "";
+  localtime_r(&epoch, &t);
 
   char buf[32];
   int hour = t.tm_hour % 12;
@@ -112,14 +112,13 @@ static String formatLocalTimestamp() {
   snprintf(buf, sizeof(buf), "%02d/%02d/%04d %d:%02d %s",
            t.tm_mon + 1, t.tm_mday, t.tm_year + 1900,
            hour, t.tm_min, ampm);
-
   return String(buf);
 }
 
-// A short per-minute key so the screen updates even when status doesn't change
-static String minuteKey() {
+static String minuteKeyFromEpoch(time_t epoch) {
+  if (epoch <= 0) return "";
   struct tm t;
-  if (!getLocalTime(&t, 10)) return ""; // no time yet, don't force minute refresh
+  localtime_r(&epoch, &t);
   char buf[8];
   snprintf(buf, sizeof(buf), "%02d%02d", t.tm_hour, t.tm_min);
   return String(buf);
@@ -142,6 +141,15 @@ static String formatNextEvent(const String& iso) {
   return String(buf);
 }
 
+static int64_t daysFromCivil(int y, unsigned m, unsigned d) {
+  y -= m <= 2;
+  const int era = (y >= 0 ? y : y - 399) / 400;
+  const unsigned yoe = (unsigned)(y - era * 400);
+  const unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+  const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  return era * 146097 + (int)doe - 719468;
+}
+
 static bool parseIsoToEpoch(const String& iso, time_t &epochOut) {
   // Accepts offsets like ±HH:MM and Z.
   if (iso.length() < 19) return false;
@@ -153,44 +161,32 @@ static bool parseIsoToEpoch(const String& iso, time_t &epochOut) {
   int minute = iso.substring(14, 16).toInt();
   int second = iso.substring(17, 19).toInt();
 
-  struct tm tmUtc = {};
-  tmUtc.tm_year = year - 1900;
-  tmUtc.tm_mon = month - 1;
-  tmUtc.tm_mday = day;
-  tmUtc.tm_hour = hour;
-  tmUtc.tm_min = minute;
-  tmUtc.tm_sec = second;
-
-  time_t utc = mktime(&tmUtc);
-  if (utc <= 0) return false;
-
+  int tzOffsetSeconds = 0;
   if (iso.length() >= 20 && iso[19] == 'Z') {
-    epochOut = utc;
-    return true;
-  }
-
-  if (iso.length() >= 25) {
-    char sign = iso[19];
+    tzOffsetSeconds = 0;
+  } else if (iso.length() >= 25 && (iso[19] == '+' || iso[19] == '-')) {
     int offH = iso.substring(20, 22).toInt();
     int offM = iso.substring(23, 25).toInt();
-    int offset = (offH * 3600) + (offM * 60);
-    if (sign == '+') {
-      utc -= offset;
-    } else if (sign == '-') {
-      utc += offset;
-    }
-    epochOut = utc;
-    return true;
+    tzOffsetSeconds = (offH * 3600) + (offM * 60);
+    if (iso[19] == '+') tzOffsetSeconds = tzOffsetSeconds;
+    else                tzOffsetSeconds = -tzOffsetSeconds;
+  } else {
+    return false;
   }
 
-  return false;
+  int64_t days = daysFromCivil(year, (unsigned)month, (unsigned)day);
+  int64_t localSeconds = days * 86400LL + hour * 3600LL + minute * 60LL + second;
+  int64_t utcSeconds = localSeconds - tzOffsetSeconds;
+  epochOut = (time_t)utcSeconds;
+  return true;
 }
 
-static String formatUntil(const String& iso, const String& source) {
+static String formatUntil(const String& iso, const String& source, time_t nowEpoch) {
   time_t eventEpoch = 0;
   if (!parseIsoToEpoch(iso, eventEpoch)) return "";
 
-  time_t nowEpoch = time(nullptr);
+  if (nowEpoch <= 0) return "";
+
   long seconds = (long)difftime(eventEpoch, nowEpoch);
   if (seconds <= 0) return "";
 
@@ -443,6 +439,8 @@ static void showStatusScreen(const String &nameIn,
                              const String &untilIn,
                              const String &sourceIn,
                              const String &nextEventIn,
+                             const String &generatedTimestampIn = "",
+                             time_t generatedEpochIn = 0,
                              bool usePartialUpdate = true) {
   const int margin = 14;
 
@@ -505,7 +503,7 @@ static void showStatusScreen(const String &nameIn,
   EPD_DrawLine(margin, 124, EPD_W - margin, 124, BLACK);
 
   String detailLine = detail;
-  String untilLine = formatUntil(untilIn, sourceIn);
+  String untilLine = formatUntil(untilIn, sourceIn, generatedEpochIn);
   String nextLine = formatNextEvent(nextEventIn);
   String lines[3] = { detailLine, untilLine, nextLine };
 
@@ -530,8 +528,8 @@ static void showStatusScreen(const String &nameIn,
     EPD_DrawLine(margin, 226, EPD_W - margin, 226, BLACK);
   }
 
-  // Bottom-right timestamp (custom 24px sans)
-  String ts = formatLocalTimestamp();
+  // Bottom-right timestamp from status.json (formatted in Pacific time)
+  String ts = generatedTimestampIn;
   if (ts.length()) {
     int tsW = scaledSans24TextWidthPx(ts, 1, detailTracking);
     int tsX = EPD_W - margin - tsW;
@@ -552,7 +550,7 @@ static void showStatusScreen(const String &nameIn,
 
 static void showStatusSplash(const String &line1, const String &line2) {
   // Use the same status layout for splash screens
-  showStatusScreen(line1, "error", line2, "", "", "", "");
+  showStatusScreen(line1, "error", line2, "", "", "", "", "", 0);
 }
 
 // -------------------- PANEL INIT --------------------
@@ -600,7 +598,7 @@ static void handleRebootButtons() {
 static bool fetchAndMaybeUpdateDisplay() {
   if (WiFi.status() != WL_CONNECTED) {
     // Don't spam partial refreshes; show a useful offline screen.
-    showStatusScreen("WIFI OFFLINE", "error", "OFFLINE", "MAC " + getMacString(), "", "", "");
+    showStatusScreen("WIFI OFFLINE", "error", "OFFLINE", "MAC " + getMacString(), "", "", "", "", 0);
     return false;
   }
 
@@ -610,7 +608,7 @@ static bool fetchAndMaybeUpdateDisplay() {
 
   if (code != 200) {
     http.end();
-    showStatusScreen("HTTP ERROR", "error", "OFFLINE", String(code), "", "", "");
+    showStatusScreen("HTTP ERROR", "error", "OFFLINE", String(code), "", "", "", "", 0);
     return false;
   }
 
@@ -621,9 +619,16 @@ static bool fetchAndMaybeUpdateDisplay() {
   StaticJsonDocument<8192> doc;
   DeserializationError err = deserializeJson(doc, payload);
   if (err) {
-    showStatusScreen("JSON ERROR", "error", "OFFLINE", err.c_str(), "", "", "");
+    showStatusScreen("JSON ERROR", "error", "OFFLINE", err.c_str(), "", "", "", "", 0);
     return false;
   }
+
+  String generatedIso = String((const char*)(doc["generated"] | ""));
+  time_t generatedEpoch = 0;
+  if (!parseIsoToEpoch(generatedIso, generatedEpoch)) {
+    generatedEpoch = 0;
+  }
+  String generatedTimestampDisplay = formatTimestampFromEpoch(generatedEpoch);
 
   String target = String(TARGET_PERSON);
   target.toLowerCase();
@@ -670,7 +675,7 @@ static bool fetchAndMaybeUpdateDisplay() {
   }
 
   // Fingerprint what matters + current minute (so clock updates)
-  String displayKey = topName + "|" + state + "|" + bigStatus + "|" + detailLine + "|" + until + "|" + nextEventAt + "|" + source + "|" + minuteKey();
+  String displayKey = topName + "|" + state + "|" + bigStatus + "|" + detailLine + "|" + until + "|" + nextEventAt + "|" + source + "|" + minuteKeyFromEpoch(generatedEpoch);
   uint32_t fp = fnv1a32(displayKey);
 
   if (fp == lastFingerprint) {
@@ -692,12 +697,12 @@ static bool fetchAndMaybeUpdateDisplay() {
       Serial.println("[EPD] Status changed; forcing full refresh/clear...");
     }
     epdFullRefreshClear();
-    showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, false);
+    showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, generatedTimestampDisplay, generatedEpoch, false);
     return true;
   }
 
   // Draw + partial update
-  showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt);
+  showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, generatedTimestampDisplay, generatedEpoch);
 
   partialSinceFull++;
   Serial.printf("[EPD] Updated. partialSinceFull=%u\n", partialSinceFull);
@@ -707,7 +712,7 @@ static bool fetchAndMaybeUpdateDisplay() {
     epdFullRefreshClear();
 
     // Re-draw current content after a full clear
-    showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, false);
+    showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, generatedTimestampDisplay, generatedEpoch, false);
   }
 
   return true;
@@ -748,6 +753,9 @@ void setup() {
   initPanel();
   showStatusSplash("Booting...", "Starting WiFi");
 
+  // Timezone init for formatting server-provided timestamps
+  initTimezonePacific();
+
   // WiFi
   bool ok = connectWifiWithTimeout(20000UL);
 
@@ -756,12 +764,10 @@ void setup() {
     Serial.println(WiFi.localIP());
     showStatusSplash("WiFi OK", WiFi.localIP().toString());
 
-    // Time init so timestamp renders
-    initTimePacific();
   } else {
     Serial.println("WiFi failed to connect.");
     // Show MAC so you can identify the device even when offline
-    showStatusScreen("WIFI FAILED", "error", "OFFLINE", "MAC " + getMacString(), "", "", "");
+    showStatusScreen("WIFI FAILED", "error", "OFFLINE", "MAC " + getMacString(), "", "", "", "", 0);
   }
 
   // Poll immediately on boot
