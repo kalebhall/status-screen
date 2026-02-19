@@ -33,8 +33,8 @@ static const char *WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 static const char *STATUS_URL = "http://<pi-ip>/status.json";
 static const char *TARGET_PERSON = "alex"; // Match against the "name" field (case-insensitive).
 
-// Poll server every minute
-constexpr unsigned long POLL_MS = 60UL * 1000UL;
+// Poll server every 30 seconds
+constexpr unsigned long POLL_MS = 30UL * 1000UL;
 
 // Full refresh every N partial updates (helps reduce ghosting)
 constexpr uint8_t FULL_REFRESH_EVERY = 30;  // ~30 minutes if changing every minute
@@ -679,13 +679,18 @@ static bool fetchAndMaybeUpdateDisplay() {
   }
 
   String statusSignature = state + "|" + bigStatus;
-  bool statusChanged = lastStatusSignature.length() > 0 && statusSignature != lastStatusSignature;
+  bool firstStatusRender = lastStatusSignature.length() == 0;
+  bool statusChanged = !firstStatusRender && statusSignature != lastStatusSignature;
 
   lastFingerprint = fp;
   lastStatusSignature = statusSignature;
 
-  if (statusChanged) {
-    Serial.println("[EPD] Status changed; forcing full refresh/clear...");
+  if (firstStatusRender || statusChanged) {
+    if (firstStatusRender) {
+      Serial.println("[EPD] First status render; forcing full refresh/clear...");
+    } else {
+      Serial.println("[EPD] Status changed; forcing full refresh/clear...");
+    }
     epdFullRefreshClear();
     showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, false);
     return true;
