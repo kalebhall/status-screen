@@ -25,7 +25,7 @@
 
 // Elecrow e-paper driver headers
 #include "EPD.h"   // provides EPD_* and Paint_* in this stack
-#include "custom_fonts.h"  // smooth TTF-rendered sans-serif bitmaps
+#include "roboto_fonts.h"  // Roboto Regular glyph metrics + bitmaps
 
 // -------------------- USER CONFIG --------------------
 static const char *WIFI_SSID = "YOUR_WIFI_SSID";
@@ -231,86 +231,29 @@ static inline void setPixelSafe(int x, int y) {
   }
 }
 
-static bool glyphHasAnyPixels(const uint8_t *glyph, int glyphW, int glyphH, int xCol) {
-  int stripes = glyphH / 8;
-  for (int stripe = 0; stripe < stripes; stripe++) {
-    if (glyph[stripe * glyphW + xCol] != 0x00) return true;
+static const RobotoGlyph* getRobotoGlyph(const RobotoFont &font, char c) {
+  if (c < (char)font.first || c > (char)font.last) return nullptr;
+  return &font.glyphs[(uint8_t)c - font.first];
+}
+
+static int robotoTextWidthPx(const RobotoFont &font, const String &s, int tracking = 0) {
+  if (!s.length()) return 0;
+  int total = 0;
+  for (size_t i = 0; i < s.length(); i++) {
+    const RobotoGlyph *glyph = getRobotoGlyph(font, s[i]);
+    total += glyph ? glyph->xAdvance : (font.yAdvance / 3);
+    if (i + 1 < s.length()) total += tracking;
   }
-  return false;
-}
-
-static void getGlyphMetrics(const uint8_t *glyph, int glyphW, int glyphH, int &leftOut, int &advanceOut) {
-  int left = 0;
-  while (left < glyphW && !glyphHasAnyPixels(glyph, glyphW, glyphH, left)) left++;
-
-  int right = glyphW - 1;
-  while (right >= left && !glyphHasAnyPixels(glyph, glyphW, glyphH, right)) right--;
-
-  // Keep whitespace readable and avoid zero-width glyphs.
-  if (left >= glyphW || right < left) {
-    leftOut = 0;
-    advanceOut = max(1, glyphW / 2);
-    return;
-  }
-
-  int inkWidth = right - left + 1;
-  // Add baseline breathing room between glyphs before tracking.
-  leftOut = left;
-  advanceOut = inkWidth + 2;
-}
-
-static int glyphSpacingNudge(char c) {
-  int extra = 0;
-  // Very narrow glyphs need a touch more room on e-paper to avoid visual crowding.
-  if (c == 'i' || c == 'l' || c == 'I' || c == '1') extra += 1;
-  // Keep numeric strings from looking cramped.
-  if (c >= '0' && c <= '9') extra += 1;
-  return extra;
-}
-
-static int sans56SpacingNudge(char c) {
-  int extra = glyphSpacingNudge(c);
-  // Big status text needs more breathing room than body text.
-  extra += 1;
-  // Wide lowercase glyphs often look clipped at e-paper stroke thickness.
-  if (c == 'm' || c == 'w' || c == 'M' || c == 'W') extra += 1;
-  return extra;
+  return total;
 }
 
 static int scaledSans24TextWidthPx(const String &s, uint8_t scale, int tracking = 0) {
   if (!s.length()) return 0;
-  int total = 0;
-  for (size_t i = 0; i < s.length(); i++) {
-    char c = s[i];
-    int advance = 6;
-    if (c >= ' ' && c <= '~') {
-      uint16_t idx = (uint16_t)(c - ' ');
-      int left = 0;
-      getGlyphMetrics(smooth_2412[idx], 12, 24, left, advance);
-    }
-    int nudge = glyphSpacingNudge(c);
-    total += ((advance + nudge) * (int)scale);
-    if (i + 1 < s.length()) total += tracking;
-  }
-  return total;
+  return robotoTextWidthPx(roboto24, s, tracking) * (int)scale;
 }
 
 static int sans56TextWidthPx(const String &s, int tracking = 0) {
-  if (!s.length()) return 0;
-  int total = 0;
-  for (size_t i = 0; i < s.length(); i++) {
-    char c = s[i];
-    int advance = 18;
-    if (c >= ' ' && c <= '~') {
-      int idx = (uint16_t)(c - ' ');
-      int left = 0;
-      getGlyphMetrics(smooth_5636[idx], 36, 56, left, advance);
-    }
-    int nudge = sans56SpacingNudge(c);
-    total += (advance + nudge);
-    if (i + 1 < s.length()) total += tracking;
-  }
-  return total;
+  return robotoTextWidthPx(roboto56, s, tracking);
 }
 
 static String ellipsizeSans24ToFit(String s, uint8_t scale, int tracking, int maxWidthPx) {
@@ -334,26 +277,24 @@ static String ellipsizeSans56ToFit(String s, int tracking, int maxWidthPx) {
 static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale, int tracking = 0, bool bold = false) {
   if (scale < 1) scale = 1;
   int cursorX = x;
+  const int baselineY = y + roboto24.ascent * scale;
+
   for (size_t ci = 0; ci < s.length(); ci++) {
-    char c = s[ci];
-    if (c < ' ' || c > '~') {
-      cursorX += (12 * scale) + tracking;
+    const RobotoGlyph *glyph = getRobotoGlyph(roboto24, s[ci]);
+    if (!glyph) {
+      cursorX += (roboto24.yAdvance / 3) * scale;
+      if (ci + 1 < s.length()) cursorX += tracking;
       continue;
     }
 
-    uint16_t idx = (uint16_t)(c - ' ');
-    int left = 0;
-    int advance = 0;
-    getGlyphMetrics(smooth_2412[idx], 12, 24, left, advance);
-    uint16_t px = 0;
-    uint16_t py = 0;
-
-    for (uint16_t i = 0; i < 36; i++) {
-      uint8_t temp = smooth_2412[idx][i];
-      for (uint8_t bit = 0; bit < 8; bit++) {
-        if (temp & 0x01) {
-          int bx = cursorX + (px - left) * scale;
-          int by = y + (py + bit) * scale;
+    const int rowBytes = (glyph->width + 7) / 8;
+    const uint8_t *glyphBitmap = roboto24.bitmap + glyph->bitmapOffset;
+    for (int gy = 0; gy < glyph->height; gy++) {
+      for (int gx = 0; gx < glyph->width; gx++) {
+        uint8_t b = glyphBitmap[gy * rowBytes + gx / 8];
+        if (b & (0x80 >> (gx & 7))) {
+          int bx = cursorX + (glyph->xOffset + gx) * scale;
+          int by = baselineY + (glyph->yOffset + gy) * scale;
           for (uint8_t sx = 0; sx < scale; sx++) {
             for (uint8_t sy = 0; sy < scale; sy++) {
               setPixelSafe(bx + sx, by + sy);
@@ -361,46 +302,39 @@ static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale,
             }
           }
         }
-        temp >>= 1;
-      }
-      px++;
-      if (px == 12) {
-        px = 0;
-        py = py + 8;
       }
     }
 
-    int nudge = glyphSpacingNudge(c);
-    cursorX += ((advance + nudge) * scale) + tracking;
+    cursorX += (glyph->xAdvance * scale);
+    if (ci + 1 < s.length()) cursorX += tracking;
   }
 }
 
-// Native 56px-tall sans-serif font (smooth_5636: 36px wide x 56px tall).
-// Used for the big status word — rendered directly from TTF, no upscaling.
 static void drawSans56String(int x, int y, const String &s, int tracking = -1, bool bold = true) {
-  const int CELL_W = 36;
-  const int STRIPES = 7; // 56 / 8
+  const int baselineY = y + roboto56.ascent;
   int cx = x;
+
   for (size_t ci = 0; ci < s.length(); ci++) {
-    char c = s[ci];
-    if (c < ' ' || c > '~') { cx += CELL_W + tracking; continue; }
-    int idx = (uint8_t)c - ' ';
-    int left = 0;
-    int advance = 0;
-    getGlyphMetrics(smooth_5636[idx], CELL_W, 56, left, advance);
-    for (int stripe = 0; stripe < STRIPES; stripe++) {
-      for (int col = 0; col < CELL_W; col++) {
-        uint8_t b = smooth_5636[idx][stripe * CELL_W + col];
-        for (int bit = 0; bit < 8; bit++) {
-          if (b & (1 << bit)) {
-            setPixelSafe(cx + (col - left), y + stripe * 8 + bit);
-            if (bold) setPixelSafe(cx + (col - left) + 1, y + stripe * 8 + bit);
+    const RobotoGlyph *glyph = getRobotoGlyph(roboto56, s[ci]);
+    if (!glyph) {
+      cx += (roboto56.yAdvance / 3);
+      if (ci + 1 < s.length()) cx += tracking;
+      continue;
+    }
+    const int rowBytes = (glyph->width + 7) / 8;
+    const uint8_t *glyphBitmap = roboto56.bitmap + glyph->bitmapOffset;
+    for (int gy = 0; gy < glyph->height; gy++) {
+      for (int gx = 0; gx < glyph->width; gx++) {
+        uint8_t b = glyphBitmap[gy * rowBytes + gx / 8];
+        if (b & (0x80 >> (gx & 7))) {
+          setPixelSafe(cx + glyph->xOffset + gx, baselineY + glyph->yOffset + gy);
+          if (bold) setPixelSafe(cx + glyph->xOffset + gx + 1, baselineY + glyph->yOffset + gy);
           }
         }
       }
     }
-    int nudge = sans56SpacingNudge(c);
-    cx += (advance + nudge) + tracking;
+    cx += glyph->xAdvance;
+    if (ci + 1 < s.length()) cx += tracking;
   }
 }
 
