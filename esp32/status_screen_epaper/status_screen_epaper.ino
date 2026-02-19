@@ -231,14 +231,66 @@ static inline void setPixelSafe(int x, int y) {
   }
 }
 
+static bool glyphHasAnyPixels(const uint8_t *glyph, int glyphW, int glyphH, int xCol) {
+  int stripes = glyphH / 8;
+  for (int stripe = 0; stripe < stripes; stripe++) {
+    if (glyph[stripe * glyphW + xCol] != 0x00) return true;
+  }
+  return false;
+}
+
+static void getGlyphMetrics(const uint8_t *glyph, int glyphW, int glyphH, int &leftOut, int &advanceOut) {
+  int left = 0;
+  while (left < glyphW && !glyphHasAnyPixels(glyph, glyphW, glyphH, left)) left++;
+
+  int right = glyphW - 1;
+  while (right >= left && !glyphHasAnyPixels(glyph, glyphW, glyphH, right)) right--;
+
+  // Keep whitespace readable and avoid zero-width glyphs.
+  if (left >= glyphW || right < left) {
+    leftOut = 0;
+    advanceOut = max(1, glyphW / 2);
+    return;
+  }
+
+  int inkWidth = right - left + 1;
+  // Add one pixel of breathing room between glyphs before tracking.
+  leftOut = left;
+  advanceOut = inkWidth + 1;
+}
+
 static int scaledSans24TextWidthPx(const String &s, uint8_t scale, int tracking = 0) {
   if (!s.length()) return 0;
-  return (int)s.length() * 12 * (int)scale + ((int)s.length() - 1) * tracking;
+  int total = 0;
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    int advance = 6;
+    if (c >= ' ' && c <= '~') {
+      uint16_t idx = (uint16_t)(c - ' ');
+      int left = 0;
+      getGlyphMetrics(smooth_2412[idx], 12, 24, left, advance);
+    }
+    total += (advance * (int)scale);
+    if (i + 1 < s.length()) total += tracking;
+  }
+  return total;
 }
 
 static int sans56TextWidthPx(const String &s, int tracking = 0) {
   if (!s.length()) return 0;
-  return (int)s.length() * 36 + ((int)s.length() - 1) * tracking;
+  int total = 0;
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    int advance = 18;
+    if (c >= ' ' && c <= '~') {
+      int idx = (uint16_t)(c - ' ');
+      int left = 0;
+      getGlyphMetrics(smooth_5636[idx], 36, 56, left, advance);
+    }
+    total += advance;
+    if (i + 1 < s.length()) total += tracking;
+  }
+  return total;
 }
 
 static String ellipsizeSans24ToFit(String s, uint8_t scale, int tracking, int maxWidthPx) {
@@ -270,6 +322,9 @@ static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale,
     }
 
     uint16_t idx = (uint16_t)(c - ' ');
+    int left = 0;
+    int advance = 0;
+    getGlyphMetrics(smooth_2412[idx], 12, 24, left, advance);
     uint16_t px = 0;
     uint16_t py = 0;
 
@@ -277,7 +332,7 @@ static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale,
       uint8_t temp = smooth_2412[idx][i];
       for (uint8_t bit = 0; bit < 8; bit++) {
         if (temp & 0x01) {
-          int bx = cursorX + px * scale;
+          int bx = cursorX + (px - left) * scale;
           int by = y + (py + bit) * scale;
           for (uint8_t sx = 0; sx < scale; sx++) {
             for (uint8_t sy = 0; sy < scale; sy++) {
@@ -295,7 +350,7 @@ static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale,
       }
     }
 
-    cursorX += (12 * scale) + tracking;
+    cursorX += (advance * scale) + tracking;
   }
 }
 
@@ -309,18 +364,21 @@ static void drawSans56String(int x, int y, const String &s, int tracking = -3, b
     char c = s[ci];
     if (c < ' ' || c > '~') { cx += CELL_W + tracking; continue; }
     int idx = (uint8_t)c - ' ';
+    int left = 0;
+    int advance = 0;
+    getGlyphMetrics(smooth_5636[idx], CELL_W, 56, left, advance);
     for (int stripe = 0; stripe < STRIPES; stripe++) {
       for (int col = 0; col < CELL_W; col++) {
         uint8_t b = smooth_5636[idx][stripe * CELL_W + col];
         for (int bit = 0; bit < 8; bit++) {
           if (b & (1 << bit)) {
-            setPixelSafe(cx + col, y + stripe * 8 + bit);
-            if (bold) setPixelSafe(cx + col + 1, y + stripe * 8 + bit);
+            setPixelSafe(cx + (col - left), y + stripe * 8 + bit);
+            if (bold) setPixelSafe(cx + (col - left) + 1, y + stripe * 8 + bit);
           }
         }
       }
     }
-    cx += CELL_W + tracking;
+    cx += advance + tracking;
   }
 }
 
@@ -683,7 +741,7 @@ static bool fetchAndMaybeUpdateDisplay() {
     return false;
   }
 
-  String statusSignature = state + "|" + bigStatus;
+  String statusSignature = state + "|" + bigStatus + "|" + source;
   bool firstStatusRender = lastStatusSignature.length() == 0;
   bool statusChanged = !firstStatusRender && statusSignature != lastStatusSignature;
 
