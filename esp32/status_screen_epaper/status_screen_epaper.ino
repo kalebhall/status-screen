@@ -268,6 +268,15 @@ static int glyphSpacingNudge(char c) {
   return extra;
 }
 
+static int sans56SpacingNudge(char c) {
+  int extra = glyphSpacingNudge(c);
+  // Big status text needs more breathing room than body text.
+  extra += 1;
+  // Wide lowercase glyphs often look clipped at e-paper stroke thickness.
+  if (c == 'm' || c == 'w' || c == 'M' || c == 'W') extra += 1;
+  return extra;
+}
+
 static int scaledSans24TextWidthPx(const String &s, uint8_t scale, int tracking = 0) {
   if (!s.length()) return 0;
   int total = 0;
@@ -297,7 +306,7 @@ static int sans56TextWidthPx(const String &s, int tracking = 0) {
       int left = 0;
       getGlyphMetrics(smooth_5636[idx], 36, 56, left, advance);
     }
-    int nudge = glyphSpacingNudge(c);
+    int nudge = sans56SpacingNudge(c);
     total += (advance + nudge);
     if (i + 1 < s.length()) total += tracking;
   }
@@ -368,7 +377,7 @@ static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale,
 
 // Native 56px-tall sans-serif font (smooth_5636: 36px wide x 56px tall).
 // Used for the big status word — rendered directly from TTF, no upscaling.
-static void drawSans56String(int x, int y, const String &s, int tracking = -3, bool bold = true) {
+static void drawSans56String(int x, int y, const String &s, int tracking = -1, bool bold = true) {
   const int CELL_W = 36;
   const int STRIPES = 7; // 56 / 8
   int cx = x;
@@ -390,7 +399,7 @@ static void drawSans56String(int x, int y, const String &s, int tracking = -3, b
         }
       }
     }
-    int nudge = glyphSpacingNudge(c);
+    int nudge = sans56SpacingNudge(c);
     cx += (advance + nudge) + tracking;
   }
 }
@@ -453,11 +462,31 @@ static void drawStatusIcon(const String& state, int x, int y, int w, int h) {
   }
 
   if (s == "ooo") {
-    // Airplane-ish icon — thick strokes
-    thickLine(x + 8, y + h - 14, x + w - 8, y + 12, 2);
-    thickLine(x + w - 18, y + 22, x + w - 8, y + 12, 2);
-    thickLine(x + w - 24, y + 18, x + w - 16, y + 30, 2);
-    thickLine(x + 18, y + h - 12, x + 28, y + h - 2, 2);
+    // Stick figure walking out a door.
+    int doorLeft = x + w - 26;
+    int doorTop = y + 10;
+    int doorRight = x + w - 8;
+    int doorBottom = y + h - 8;
+
+    // Door frame and opening.
+    thickLine(doorLeft, doorTop, doorLeft, doorBottom, 2);
+    thickLine(doorLeft, doorTop, doorRight, doorTop, 2);
+    thickLine(doorRight, doorTop, doorRight, doorBottom, 2);
+
+    int headX = x + 20;
+    int headY = y + 20;
+    drawCircle(headX, headY, 6, 2);
+
+    // Body leaning toward the door.
+    thickLine(headX, headY + 8, headX + 6, y + 42, 2);
+
+    // Arms (forward arm reaching to the door).
+    thickLine(headX + 4, y + 30, x + 34, y + 34, 2);
+    thickLine(headX + 2, y + 30, x + 14, y + 35, 2);
+
+    // Walking legs (one forward, one trailing).
+    thickLine(headX + 6, y + 42, x + 34, y + 58, 2);
+    thickLine(headX + 6, y + 42, x + 18, y + 60, 2);
     return;
   }
 
