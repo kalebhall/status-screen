@@ -254,9 +254,18 @@ static void getGlyphMetrics(const uint8_t *glyph, int glyphW, int glyphH, int &l
   }
 
   int inkWidth = right - left + 1;
-  // Add one pixel of breathing room between glyphs before tracking.
+  // Add baseline breathing room between glyphs before tracking.
   leftOut = left;
-  advanceOut = inkWidth + 1;
+  advanceOut = inkWidth + 2;
+}
+
+static int glyphSpacingNudge(char c) {
+  int extra = 0;
+  // Very narrow glyphs need a touch more room on e-paper to avoid visual crowding.
+  if (c == 'i' || c == 'l' || c == 'I' || c == '1') extra += 1;
+  // Keep numeric strings from looking cramped.
+  if (c >= '0' && c <= '9') extra += 1;
+  return extra;
 }
 
 static int scaledSans24TextWidthPx(const String &s, uint8_t scale, int tracking = 0) {
@@ -270,7 +279,8 @@ static int scaledSans24TextWidthPx(const String &s, uint8_t scale, int tracking 
       int left = 0;
       getGlyphMetrics(smooth_2412[idx], 12, 24, left, advance);
     }
-    total += (advance * (int)scale);
+    int nudge = glyphSpacingNudge(c);
+    total += ((advance + nudge) * (int)scale);
     if (i + 1 < s.length()) total += tracking;
   }
   return total;
@@ -287,7 +297,8 @@ static int sans56TextWidthPx(const String &s, int tracking = 0) {
       int left = 0;
       getGlyphMetrics(smooth_5636[idx], 36, 56, left, advance);
     }
-    total += advance;
+    int nudge = glyphSpacingNudge(c);
+    total += (advance + nudge);
     if (i + 1 < s.length()) total += tracking;
   }
   return total;
@@ -350,7 +361,8 @@ static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale,
       }
     }
 
-    cursorX += (advance * scale) + tracking;
+    int nudge = glyphSpacingNudge(c);
+    cursorX += ((advance + nudge) * scale) + tracking;
   }
 }
 
@@ -378,7 +390,8 @@ static void drawSans56String(int x, int y, const String &s, int tracking = -3, b
         }
       }
     }
-    cx += advance + tracking;
+    int nudge = glyphSpacingNudge(c);
+    cx += (advance + nudge) + tracking;
   }
 }
 
