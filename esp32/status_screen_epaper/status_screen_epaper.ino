@@ -366,6 +366,39 @@ static void drawCircle(int cx, int cy, int r, int thickness = 2) {
   }
 }
 
+static void fillRect(int x1, int y1, int x2, int y2) {
+  EPD_DrawRectangle(x1, y1, x2, y2, BLACK, 1);
+}
+
+static void fillCircle(int cx, int cy, int r) {
+  EPD_DrawCircle(cx, cy, r, BLACK, 1);
+}
+
+static void drawArc(int cx, int cy, int r, int startDeg, int endDeg, int thickness = 2) {
+  for (int deg = startDeg; deg <= endDeg; deg++) {
+    float rad = deg * 0.0174533f;
+    for (int t = -thickness; t <= thickness; t++) {
+      int px = cx + (int)((r + t) * cos(rad));
+      int py = cy + (int)((r + t) * sin(rad));
+      Paint_SetPixel(px, py, BLACK);
+    }
+  }
+}
+
+static void drawMapPin(int cx, int cy, int scale = 1) {
+  int headR = 4 * scale;
+  fillCircle(cx, cy - 2 * scale, headR);
+
+  for (int py = 0; py <= 6 * scale; py++) {
+    int span = (6 * scale - py) / 2;
+    thickLine(cx - span, cy + py, cx + span, cy + py, 0);
+  }
+
+  // Ground ring under the pin.
+  drawCircle(cx, cy + 8 * scale, 3 * scale, 1);
+  drawCircle(cx, cy + 8 * scale, 1 * scale, 1);
+}
+
 static void drawStatusIcon(const String& state, int x, int y, int w, int h) {
   String s = state;
   s.toLowerCase();
@@ -382,44 +415,48 @@ static void drawStatusIcon(const String& state, int x, int y, int w, int h) {
   }
 
   if (s == "meeting") {
-    // Calendar box — three nested rectangles for a thick border
-    EPD_DrawRectangle(x + 4, y + 10, x + w - 4, y + h - 6, BLACK, 0);
-    EPD_DrawRectangle(x + 5, y + 11, x + w - 5, y + h - 7, BLACK, 0);
-    EPD_DrawRectangle(x + 6, y + 12, x + w - 6, y + h - 8, BLACK, 0);
-    // Header divider (horizontal)
-    thickLine(x + 6, y + 22, x + w - 6, y + 22, 2);
-    // Tab pegs (vertical, above top edge)
-    thickLine(x + 16, y + 5, x + 16, y + 16, 2);
-    thickLine(x + w - 16, y + 5, x + w - 16, y + 16, 2);
+    // Monitor frame + stand.
+    EPD_DrawRectangle(x + 2, y + 8, x + 34, y + 46, BLACK, 0);
+    EPD_DrawRectangle(x + 3, y + 9, x + 33, y + 45, BLACK, 0);
+    fillRect(x + 14, y + 47, x + 22, y + 51);
+    fillRect(x + 11, y + 52, x + 25, y + 54);
+
+    // Person on screen.
+    fillCircle(x + 18, y + 22, 5);
+    fillCircle(x + 18, y + 39, 8);
+    fillRect(x + 10, y + 39, x + 26, y + 45);
+
+    // Main attendee (headset silhouette).
+    fillCircle(x + 52, y + 22, 10);
+    thickLine(x + 42, y + 22, x + 42, y + 30, 2);
+    thickLine(x + 62, y + 22, x + 62, y + 30, 2);
+    drawArc(x + 52, y + 22, 14, 205, 335, 2);
+
+    // Shoulders + torso.
+    fillCircle(x + 52, y + 46, 15);
+    fillRect(x + 36, y + 46, x + 68, y + 57);
+    EPD_DrawRectangle(x + 32, y + 51, x + 68, y + 71, BLACK, 0);
+    EPD_DrawRectangle(x + 33, y + 52, x + 67, y + 70, BLACK, 0);
     return;
   }
 
   if (s == "ooo") {
-    // Stick figure walking out a door.
-    int doorLeft = x + w - 26;
-    int doorTop = y + 10;
-    int doorRight = x + w - 8;
-    int doorBottom = y + h - 8;
+    // Global ring with openings.
+    drawArc(x + 30, y + 36, 26, 30, 170, 2);
+    drawArc(x + 30, y + 36, 26, 185, 300, 2);
 
-    // Door frame and opening.
-    thickLine(doorLeft, doorTop, doorLeft, doorBottom, 2);
-    thickLine(doorLeft, doorTop, doorRight, doorTop, 2);
-    thickLine(doorRight, doorTop, doorRight, doorBottom, 2);
+    // Location pins around the ring.
+    drawMapPin(x + 12, y + 24, 1);
+    drawMapPin(x + 55, y + 16, 1);
+    drawMapPin(x + 31, y + 24, 1);
+    drawMapPin(x + 22, y + 46, 1);
 
-    int headX = x + 20;
-    int headY = y + 20;
-    drawCircle(headX, headY, 6, 2);
-
-    // Body leaning toward the door.
-    thickLine(headX, headY + 8, headX + 6, y + 42, 2);
-
-    // Arms (forward arm reaching to the door).
-    thickLine(headX + 4, y + 30, x + 34, y + 34, 2);
-    thickLine(headX + 2, y + 30, x + 14, y + 35, 2);
-
-    // Walking legs (one forward, one trailing).
-    thickLine(headX + 6, y + 42, x + 34, y + 58, 2);
-    thickLine(headX + 6, y + 42, x + 18, y + 60, 2);
+    // Remote worker with laptop.
+    fillCircle(x + 52, y + 42, 6);
+    fillCircle(x + 52, y + 54, 8);
+    fillRect(x + 44, y + 54, x + 60, y + 59);
+    fillRect(x + 43, y + 58, x + 63, y + 69);
+    fillRect(x + 42, y + 71, x + 63, y + 72);
     return;
   }
 
