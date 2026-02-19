@@ -259,6 +259,11 @@ void EPD_Display(const uint8_t *ImageBW)
   EPD_SetRAMSP();
   EPD_SetRAMSA();
   EPD_WR_REG(0xa4);   //write RAM for black(0)/white (1)
+  // Restart the source buffer scan for the second controller RAM pass.
+  // If we keep the previous loop offsets, reads run past ImageBW and the
+  // display can retain stale pixels/ghosted glyphs after status changes.
+  tempcol = 0;
+  templine = 0;
   for (i = 0; i < ALLSCREEN_BYTES; i++)
   {
     tempOriginal = *(ImageBW + templine * Source_BYTES * 2 + tempcol);
