@@ -329,7 +329,6 @@ static void drawSans56String(int x, int y, const String &s, int tracking = -1, b
         if (b & (0x80 >> (gx & 7))) {
           setPixelSafe(cx + glyph->xOffset + gx, baselineY + glyph->yOffset + gy);
           if (bold) setPixelSafe(cx + glyph->xOffset + gx + 1, baselineY + glyph->yOffset + gy);
-          }
         }
       }
     }
