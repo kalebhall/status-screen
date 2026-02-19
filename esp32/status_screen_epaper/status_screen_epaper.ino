@@ -57,6 +57,14 @@ static String lastStatusSignature = "";
 static int menuBaseline = HIGH;
 static int backBaseline = HIGH;
 
+// Avoid Arduino auto-prototype generation issues for custom Roboto types.
+static const RobotoGlyph* getRobotoGlyph(const RobotoFont &font, char c);
+static int robotoTextWidthPx(const RobotoFont &font, const String &s, int tracking = 0);
+static int scaledSans24TextWidthPx(const String &s, uint8_t scale, int tracking = 0);
+static int sans56TextWidthPx(const String &s, int tracking = 0);
+static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale, int tracking = 0, bool bold = false);
+static void drawSans56String(int x, int y, const String &s, int tracking = -1, bool bold = true);
+
 // -------------------- HELPERS --------------------
 static uint32_t fnv1a32(const String &s) {
   uint32_t h = 2166136261u;
@@ -236,7 +244,7 @@ static const RobotoGlyph* getRobotoGlyph(const RobotoFont &font, char c) {
   return &font.glyphs[(uint8_t)c - font.first];
 }
 
-static int robotoTextWidthPx(const RobotoFont &font, const String &s, int tracking = 0) {
+static int robotoTextWidthPx(const RobotoFont &font, const String &s, int tracking) {
   if (!s.length()) return 0;
   int total = 0;
   for (size_t i = 0; i < s.length(); i++) {
@@ -247,12 +255,12 @@ static int robotoTextWidthPx(const RobotoFont &font, const String &s, int tracki
   return total;
 }
 
-static int scaledSans24TextWidthPx(const String &s, uint8_t scale, int tracking = 0) {
+static int scaledSans24TextWidthPx(const String &s, uint8_t scale, int tracking) {
   if (!s.length()) return 0;
   return robotoTextWidthPx(roboto24, s, tracking) * (int)scale;
 }
 
-static int sans56TextWidthPx(const String &s, int tracking = 0) {
+static int sans56TextWidthPx(const String &s, int tracking) {
   return robotoTextWidthPx(roboto56, s, tracking);
 }
 
@@ -274,7 +282,7 @@ static String ellipsizeSans56ToFit(String s, int tracking, int maxWidthPx) {
   return s + dots;
 }
 
-static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale, int tracking = 0, bool bold = false) {
+static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale, int tracking, bool bold) {
   if (scale < 1) scale = 1;
   int cursorX = x;
   const int baselineY = y + roboto24.ascent * scale;
@@ -310,7 +318,7 @@ static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale,
   }
 }
 
-static void drawSans56String(int x, int y, const String &s, int tracking = -1, bool bold = true) {
+static void drawSans56String(int x, int y, const String &s, int tracking, bool bold) {
   const int baselineY = y + roboto56.ascent;
   int cx = x;
 
