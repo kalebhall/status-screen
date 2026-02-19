@@ -231,12 +231,6 @@ static inline void setPixelSafe(int x, int y) {
   }
 }
 
-struct GlyphMetrics {
-  int left;
-  int right;
-  int advance;
-};
-
 static bool glyphHasAnyPixels(const uint8_t *glyph, int glyphW, int glyphH, int xCol) {
   int stripes = glyphH / 8;
   for (int stripe = 0; stripe < stripes; stripe++) {
@@ -245,7 +239,7 @@ static bool glyphHasAnyPixels(const uint8_t *glyph, int glyphW, int glyphH, int 
   return false;
 }
 
-static GlyphMetrics getGlyphMetrics(const uint8_t *glyph, int glyphW, int glyphH) {
+static void getGlyphMetrics(const uint8_t *glyph, int glyphW, int glyphH, int &leftOut, int &advanceOut) {
   int left = 0;
   while (left < glyphW && !glyphHasAnyPixels(glyph, glyphW, glyphH, left)) left++;
 
@@ -254,13 +248,15 @@ static GlyphMetrics getGlyphMetrics(const uint8_t *glyph, int glyphW, int glyphH
 
   // Keep whitespace readable and avoid zero-width glyphs.
   if (left >= glyphW || right < left) {
-    int fallbackAdvance = max(1, glyphW / 2);
-    return {0, -1, fallbackAdvance};
+    leftOut = 0;
+    advanceOut = max(1, glyphW / 2);
+    return;
   }
 
   int inkWidth = right - left + 1;
   // Add one pixel of breathing room between glyphs before tracking.
-  return {left, right, inkWidth + 1};
+  leftOut = left;
+  advanceOut = inkWidth + 1;
 }
 
 static int scaledSans24TextWidthPx(const String &s, uint8_t scale, int tracking = 0) {
@@ -271,8 +267,8 @@ static int scaledSans24TextWidthPx(const String &s, uint8_t scale, int tracking 
     int advance = 6;
     if (c >= ' ' && c <= '~') {
       uint16_t idx = (uint16_t)(c - ' ');
-      GlyphMetrics gm = getGlyphMetrics(smooth_2412[idx], 12, 24);
-      advance = gm.advance;
+      int left = 0;
+      getGlyphMetrics(smooth_2412[idx], 12, 24, left, advance);
     }
     total += (advance * (int)scale);
     if (i + 1 < s.length()) total += tracking;
@@ -288,8 +284,8 @@ static int sans56TextWidthPx(const String &s, int tracking = 0) {
     int advance = 18;
     if (c >= ' ' && c <= '~') {
       int idx = (uint16_t)(c - ' ');
-      GlyphMetrics gm = getGlyphMetrics(smooth_5636[idx], 36, 56);
-      advance = gm.advance;
+      int left = 0;
+      getGlyphMetrics(smooth_5636[idx], 36, 56, left, advance);
     }
     total += advance;
     if (i + 1 < s.length()) total += tracking;
@@ -326,7 +322,9 @@ static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale,
     }
 
     uint16_t idx = (uint16_t)(c - ' ');
-    GlyphMetrics gm = getGlyphMetrics(smooth_2412[idx], 12, 24);
+    int left = 0;
+    int advance = 0;
+    getGlyphMetrics(smooth_2412[idx], 12, 24, left, advance);
     uint16_t px = 0;
     uint16_t py = 0;
 
@@ -334,7 +332,7 @@ static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale,
       uint8_t temp = smooth_2412[idx][i];
       for (uint8_t bit = 0; bit < 8; bit++) {
         if (temp & 0x01) {
-          int bx = cursorX + (px - gm.left) * scale;
+          int bx = cursorX + (px - left) * scale;
           int by = y + (py + bit) * scale;
           for (uint8_t sx = 0; sx < scale; sx++) {
             for (uint8_t sy = 0; sy < scale; sy++) {
@@ -352,7 +350,7 @@ static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale,
       }
     }
 
-    cursorX += (gm.advance * scale) + tracking;
+    cursorX += (advance * scale) + tracking;
   }
 }
 
@@ -366,19 +364,21 @@ static void drawSans56String(int x, int y, const String &s, int tracking = -3, b
     char c = s[ci];
     if (c < ' ' || c > '~') { cx += CELL_W + tracking; continue; }
     int idx = (uint8_t)c - ' ';
-    GlyphMetrics gm = getGlyphMetrics(smooth_5636[idx], CELL_W, 56);
+    int left = 0;
+    int advance = 0;
+    getGlyphMetrics(smooth_5636[idx], CELL_W, 56, left, advance);
     for (int stripe = 0; stripe < STRIPES; stripe++) {
       for (int col = 0; col < CELL_W; col++) {
         uint8_t b = smooth_5636[idx][stripe * CELL_W + col];
         for (int bit = 0; bit < 8; bit++) {
           if (b & (1 << bit)) {
-            setPixelSafe(cx + (col - gm.left), y + stripe * 8 + bit);
-            if (bold) setPixelSafe(cx + (col - gm.left) + 1, y + stripe * 8 + bit);
+            setPixelSafe(cx + (col - left), y + stripe * 8 + bit);
+            if (bold) setPixelSafe(cx + (col - left) + 1, y + stripe * 8 + bit);
           }
         }
       }
     }
-    cx += gm.advance + tracking;
+    cx += advance + tracking;
   }
 }
 
