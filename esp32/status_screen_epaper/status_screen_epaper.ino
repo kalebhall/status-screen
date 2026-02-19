@@ -583,7 +583,8 @@ static void showStatusScreen(const String &nameIn,
   int statusMaxW = maxGroupW - iconW - gap;
 
   // Truncate if status word is wider than available space.
-  const int statusTracking = -3;
+  // Keep additional spacing for the primary label so letters don't look crowded.
+  const int statusTracking = 1;
   status = ellipsizeSans56ToFit(status, statusTracking, statusMaxW);
   int statusW = sans56TextWidthPx(status, statusTracking);
 
