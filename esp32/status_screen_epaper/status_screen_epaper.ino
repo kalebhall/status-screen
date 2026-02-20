@@ -453,6 +453,30 @@ static void drawStatusIcon(const String& state, int x, int y, int w, int h) {
   }
 
   if (s == "ooo") {
+    // Door frame + open doorway.
+    EPD_DrawRectangle(x + 40, y + 10, x + 67, y + 66, BLACK, 0);
+    EPD_DrawRectangle(x + 41, y + 11, x + 66, y + 65, BLACK, 0);
+    fillRect(x + 43, y + 14, x + 64, y + 63);
+
+    // Door opening and floor line for "leaving" direction.
+    fillRect(x + 47, y + 16, x + 63, y + 61);
+    thickLine(x + 14, y + 62, x + 63, y + 62, 1);
+
+    // Stick figure walking out the door.
+    fillCircle(x + 22, y + 24, 4);
+    thickLine(x + 22, y + 29, x + 22, y + 43, 1);
+    thickLine(x + 22, y + 34, x + 14, y + 39, 1);
+    thickLine(x + 22, y + 34, x + 31, y + 31, 1);
+    thickLine(x + 22, y + 43, x + 14, y + 56, 1);
+    thickLine(x + 22, y + 43, x + 31, y + 52, 1);
+
+    // Motion cue toward the doorway.
+    thickLine(x + 29, y + 27, x + 35, y + 24, 0);
+    thickLine(x + 29, y + 33, x + 36, y + 31, 0);
+    return;
+  }
+
+  if (s == "elsewhere") {
     // Global ring with openings.
     drawArc(x + 30, y + 36, 26, 30, 170, 2);
     drawArc(x + 30, y + 36, 26, 185, 300, 2);
