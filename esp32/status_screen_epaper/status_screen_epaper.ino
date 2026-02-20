@@ -81,7 +81,11 @@ static inline bool buttonPressed(uint8_t pin, int baseline) {
 }
 
 static void epdFullRefreshClear() {
-  // Full clear/update sequence (per typical Elecrow flows)
+  // Reinitialize the display out of fast/partial mode so the full-update
+  // waveform LUT uses standard driving voltages.  Without this, a full
+  // refresh performed while fast-mode temperature overrides are active
+  // can leave ghost pixels from the previous frame.
+  EPD_Init();
   EPD_Display_Clear();
   EPD_Update();
   partialSinceFull = 0;

@@ -259,10 +259,11 @@ void EPD_Display(const uint8_t *ImageBW)
   EPD_SetRAMSP();
   EPD_SetRAMSA();
   EPD_WR_REG(0xa4);   //write RAM for black(0)/white (1)
-  // Restart the source buffer scan for the second controller RAM pass.
-  // If we keep the previous loop offsets, reads run past ImageBW and the
-  // display can retain stale pixels/ghosted glyphs after status changes.
-  tempcol = 0;
+  // The secondary SSD1683 controller handles the right half of the display.
+  // Start one byte before the main controller ended (Source_BYTES - 1) to
+  // account for the 8-pixel column gap at the dual-controller junction,
+  // matching the offset used in EPD_WhiteScreen_ALL_Fast.
+  tempcol = Source_BYTES - 1;
   templine = 0;
   for (i = 0; i < ALLSCREEN_BYTES; i++)
   {
