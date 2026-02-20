@@ -67,39 +67,23 @@ void Paint_SetPixel(uint16_t Xpoint,uint16_t Ypoint,uint16_t Color)
 {
 	uint16_t X, Y;
 	uint32_t Addr;
-	uint8_t Rdata;		
-    switch(Paint.rotate) 
+	uint8_t Rdata;
+    switch(Paint.rotate)
 		{
 				case 0:
-					if(Xpoint>=396)
-					{
-						Xpoint+=8;
-					}
 					X=Xpoint;
 					Y=Ypoint;
 					break;
 			case 90:
-					if(Ypoint>=396)
-					{
-						Ypoint+=8;
-					}
 					X=Paint.widthMemory-Ypoint-1;
 					Y=Xpoint;
 					break;
 			case 180:
-				  if(Xpoint>=396)
-					{
-						Xpoint+=8;
-					}
 					X=Paint.widthMemory-Xpoint-1;
 					Y=Paint.heightMemory-Ypoint-1;
 					break;
 
 			case 270:
-					if(Ypoint>=396)
-					{
-						Ypoint+=8;
-					}
 					X=Ypoint;
 					Y=Paint.heightMemory-Xpoint-1;
 					break;
