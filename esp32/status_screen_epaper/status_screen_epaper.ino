@@ -43,6 +43,14 @@ constexpr uint8_t FULL_REFRESH_EVERY = 30;  // ~15 minutes if changing every 30s
 static const uint8_t BTN_MENU = 2; // MENU
 static const uint8_t BTN_BACK = 1; // EXIT/BACK
 
+// Battery sensing (CrowPanel battery connector)
+// NOTE: Adjust these calibration values if your board revision uses a
+// different divider or chemistry.
+static const int BATTERY_ADC_PIN = 4;
+constexpr float BATTERY_DIVIDER_RATIO = 2.0f; // ADC sees Vbat/divider
+constexpr int BATTERY_EMPTY_MV = 3300;
+constexpr int BATTERY_FULL_MV = 4200;
+
 // -------------------- DISPLAY BUFFER --------------------
 // 792*272/8 = 26928 bytes; Elecrow examples often allocate ~27200.
 static uint8_t ImageBW[27200];
@@ -64,6 +72,9 @@ static int scaledSans24TextWidthPx(const String &s, uint8_t scale, int tracking 
 static int sans56TextWidthPx(const String &s, int tracking = 0);
 static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale, int tracking = 0, bool bold = false);
 static void drawSans56String(int x, int y, const String &s, int tracking = -1, bool bold = true);
+static void fillRect(int x1, int y1, int x2, int y2);
+static int readBatteryPercent();
+static void drawBatteryIndicator(int x, int y, int batteryPercent);
 
 // -------------------- HELPERS --------------------
 static uint32_t fnv1a32(const String &s) {
@@ -78,6 +89,19 @@ static uint32_t fnv1a32(const String &s) {
 static inline bool buttonPressed(uint8_t pin, int baseline) {
   // Treat "changed from baseline" as pressed (works for active-low and active-high)
   return digitalRead(pin) != baseline;
+}
+
+static int readBatteryPercent() {
+  // Read battery voltage from ADC pin and map to a simple 0-100% estimate.
+  analogSetPinAttenuation(BATTERY_ADC_PIN, ADC_11db);
+  int adcMv = analogReadMilliVolts(BATTERY_ADC_PIN);
+  if (adcMv <= 0) return -1;
+
+  int batteryMv = (int)(adcMv * BATTERY_DIVIDER_RATIO);
+  long pct = (long)(batteryMv - BATTERY_EMPTY_MV) * 100L / (BATTERY_FULL_MV - BATTERY_EMPTY_MV);
+  if (pct < 0) pct = 0;
+  if (pct > 100) pct = 100;
+  return (int)pct;
 }
 
 static void epdFullRefreshClear() {
@@ -349,6 +373,32 @@ static void drawSans56String(int x, int y, const String &s, int tracking, bool b
   }
 }
 
+static void drawBatteryIndicator(int x, int y, int batteryPercent) {
+  if (batteryPercent < 0) return;
+
+  const int bodyW = 28;
+  const int bodyH = 14;
+  const int tipW = 3;
+  const int tipH = 8;
+
+  // Body + tip
+  EPD_DrawRectangle(x, y, x + bodyW, y + bodyH, BLACK, 0);
+  fillRect(x + bodyW + 1, y + (bodyH - tipH) / 2, x + bodyW + tipW, y + (bodyH + tipH) / 2);
+
+  // Fill level
+  int innerX1 = x + 2;
+  int innerY1 = y + 2;
+  int innerW = bodyW - 3;
+  int innerH = bodyH - 3;
+  int fillW = (innerW * batteryPercent) / 100;
+  if (fillW > 0) {
+    fillRect(innerX1, innerY1, innerX1 + fillW, innerY1 + innerH);
+  }
+
+  String pctText = String(batteryPercent) + "%";
+  drawSans24ScaledString(x + bodyW + tipW + 8, y - 5, pctText, 1, -1, false);
+}
+
 // Thick line helper used by all status icons (square brush of radius r).
 static void thickLine(int ax, int ay, int bx, int by, int r = 2) {
   int dx = abs(bx - ax), sx = ax < bx ? 1 : -1;
@@ -547,6 +597,7 @@ static void showStatusScreen(const String &nameIn,
                              const String &nextEventIn,
                              const String &generatedTimestampIn = "",
                              time_t generatedEpochIn = 0,
+                             int batteryPercentIn = -1,
                              bool usePartialUpdate = true) {
   const int margin = 14;
 
@@ -644,6 +695,9 @@ static void showStatusScreen(const String &nameIn,
     if (tsX < margin) tsX = margin;
     drawSans24ScaledString(tsX, tsY, ts, 1, detailTracking, false);
   }
+
+  // Bottom-left battery indicator
+  drawBatteryIndicator(margin, EPD_H - margin - 14, batteryPercentIn);
 
   EPD_Display(ImageBW);
   if (usePartialUpdate) {
@@ -781,8 +835,11 @@ static bool fetchAndMaybeUpdateDisplay() {
     detailLine = label;
   }
 
+  int batteryPercent = readBatteryPercent();
+  int batteryBucket = (batteryPercent < 0) ? -1 : ((batteryPercent + 2) / 5) * 5;
+
   // Fingerprint what matters + current minute (so clock updates)
-  String displayKey = topName + "|" + state + "|" + bigStatus + "|" + detailLine + "|" + until + "|" + nextEventAt + "|" + source + "|" + minuteKeyFromEpoch(generatedEpoch);
+  String displayKey = topName + "|" + state + "|" + bigStatus + "|" + detailLine + "|" + until + "|" + nextEventAt + "|" + source + "|" + minuteKeyFromEpoch(generatedEpoch) + "|" + String(batteryBucket);
   uint32_t fp = fnv1a32(displayKey);
 
   if (fp == lastFingerprint) {
@@ -804,12 +861,12 @@ static bool fetchAndMaybeUpdateDisplay() {
       Serial.println("[EPD] Status changed; forcing full refresh/clear...");
     }
     epdFullRefreshClear();
-    showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, generatedTimestampDisplay, generatedEpoch, false);
+    showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, generatedTimestampDisplay, generatedEpoch, batteryPercent, false);
     return true;
   }
 
   // Draw + partial update
-  showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, generatedTimestampDisplay, generatedEpoch);
+  showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, generatedTimestampDisplay, generatedEpoch, batteryPercent);
 
   partialSinceFull++;
   Serial.printf("[EPD] Updated. partialSinceFull=%u\n", partialSinceFull);
@@ -819,7 +876,7 @@ static bool fetchAndMaybeUpdateDisplay() {
     epdFullRefreshClear();
 
     // Re-draw current content after a full clear
-    showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, generatedTimestampDisplay, generatedEpoch, false);
+    showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, generatedTimestampDisplay, generatedEpoch, batteryPercent, false);
   }
 
   return true;
