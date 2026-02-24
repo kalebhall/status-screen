@@ -987,6 +987,10 @@ static bool fetchAndMaybeUpdateDisplay() {
     enterTimedDeepSleep(OFF_HOURS_WAKE_SECONDS, "off-hours updated");
   }
 
+  if (ENABLE_OFF_HOURS_DEEP_SLEEP && isOffHours(generatedEpoch)) {
+    enterTimedDeepSleep(OFF_HOURS_WAKE_SECONDS, "off-hours updated");
+  }
+
   return true;
 }
 
