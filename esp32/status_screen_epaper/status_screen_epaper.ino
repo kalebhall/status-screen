@@ -57,10 +57,19 @@ static const uint8_t BTN_BACK = 1; // EXIT/BACK
 // Battery sensing (CrowPanel battery connector)
 // NOTE: Adjust these calibration values if your board revision uses a
 // different divider or chemistry.
-static const int BATTERY_ADC_PIN = 4;
-constexpr float BATTERY_DIVIDER_RATIO = 2.0f; // ADC sees Vbat/divider
+// Battery ADC pin. Set to -1 when battery voltage is not routed to the MCU ADC.
+// On the posted CrowPanel schematic this is not clearly routed, so default is disabled.
+static const int BATTERY_ADC_PIN = -1;
+constexpr float BATTERY_DIVIDER_RATIO = 2.0f; // ADC sees Vbat/divider when wired
 constexpr int BATTERY_EMPTY_MV = 3300;
 constexpr int BATTERY_FULL_MV = 4200;
+constexpr int BATTERY_CUTOFF_MV = 3250; // If not charging, enter long deep sleep below this voltage.
+
+// Optional charging detect input from charger IC (often CHRG, active-low).
+// Board note: on the posted CrowPanel schematic, CHRG is not routed to an ESP32 GPIO
+// (it appears to go only to a test pad), so default stays -1 unless you rewire it.
+static const int BATTERY_CHARGE_DETECT_PIN = -1;
+constexpr bool BATTERY_CHARGE_ACTIVE_LOW = true;
 
 // -------------------- DISPLAY BUFFER --------------------
 // 792*272/8 = 26928 bytes; Elecrow examples often allocate ~27200.
@@ -84,8 +93,11 @@ static int sans56TextWidthPx(const String &s, int tracking = 0);
 static void drawSans24ScaledString(int x, int y, const String& s, uint8_t scale, int tracking = 0, bool bold = false);
 static void drawSans56String(int x, int y, const String &s, int tracking = -1, bool bold = true);
 static void fillRect(int x1, int y1, int x2, int y2);
+static int readBatteryMilliVolts();
 static int readBatteryPercent();
-static void drawBatteryIndicator(int x, int y, int batteryPercent);
+static bool isBatteryCharging();
+static void drawBatteryIndicator(int x, int y, int batteryPercent, bool isCharging);
+static void thickLine(int ax, int ay, int bx, int by, int r = 2);
 static bool isOffHours(time_t epoch);
 static void enterTimedDeepSleep(uint32_t seconds, const char *reason);
 
@@ -132,17 +144,40 @@ static void enterTimedDeepSleep(uint32_t seconds, const char *reason) {
   esp_deep_sleep_start();
 }
 
+static int readBatteryMilliVolts() {
+  if (BATTERY_ADC_PIN < 0) return -1;
+
+  analogSetPinAttenuation(BATTERY_ADC_PIN, ADC_11db);
+
+  // Average a few reads to reduce jitter from ADC noise.
+  long sumMv = 0;
+  const int samples = 8;
+  for (int i = 0; i < samples; i++) {
+    int sampleMv = analogReadMilliVolts(BATTERY_ADC_PIN);
+    if (sampleMv <= 0) return -1;
+    sumMv += sampleMv;
+    delay(2);
+  }
+
+  float adcMv = (float)sumMv / (float)samples;
+  return (int)(adcMv * BATTERY_DIVIDER_RATIO);
+}
+
 static int readBatteryPercent() {
   // Read battery voltage from ADC pin and map to a simple 0-100% estimate.
-  analogSetPinAttenuation(BATTERY_ADC_PIN, ADC_11db);
-  int adcMv = analogReadMilliVolts(BATTERY_ADC_PIN);
-  if (adcMv <= 0) return -1;
+  int batteryMv = readBatteryMilliVolts();
+  if (batteryMv <= 0) return -1;
 
-  int batteryMv = (int)(adcMv * BATTERY_DIVIDER_RATIO);
   long pct = (long)(batteryMv - BATTERY_EMPTY_MV) * 100L / (BATTERY_FULL_MV - BATTERY_EMPTY_MV);
   if (pct < 0) pct = 0;
   if (pct > 100) pct = 100;
   return (int)pct;
+}
+
+static bool isBatteryCharging() {
+  if (BATTERY_CHARGE_DETECT_PIN < 0) return false;
+  int raw = digitalRead(BATTERY_CHARGE_DETECT_PIN);
+  return BATTERY_CHARGE_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
 }
 
 static void epdFullRefreshClear() {
@@ -414,8 +449,8 @@ static void drawSans56String(int x, int y, const String &s, int tracking, bool b
   }
 }
 
-static void drawBatteryIndicator(int x, int y, int batteryPercent) {
-  if (batteryPercent < 0) return;
+static void drawBatteryIndicator(int x, int y, int batteryPercent, bool isCharging) {
+  if (batteryPercent < 0 && !isCharging) return;
 
   const int bodyW = 28;
   const int bodyH = 14;
@@ -436,12 +471,21 @@ static void drawBatteryIndicator(int x, int y, int batteryPercent) {
     fillRect(innerX1, innerY1, innerX1 + fillW, innerY1 + innerH);
   }
 
-  String pctText = String(batteryPercent) + "%";
+  String pctText = (batteryPercent >= 0) ? (String(batteryPercent) + "%") : String("--%");
+  if (isCharging) pctText = String("CHG ") + pctText;
   drawSans24ScaledString(x + bodyW + tipW + 8, y - 5, pctText, 1, -1, false);
+
+  if (isCharging) {
+    // Simple lightning bolt near the battery body.
+    thickLine(x + 11, y + 2, x + 16, y + 2, 0);
+    thickLine(x + 16, y + 2, x + 12, y + 7, 0);
+    thickLine(x + 12, y + 7, x + 17, y + 7, 0);
+    thickLine(x + 17, y + 7, x + 12, y + 12, 0);
+  }
 }
 
 // Thick line helper used by all status icons (square brush of radius r).
-static void thickLine(int ax, int ay, int bx, int by, int r = 2) {
+static void thickLine(int ax, int ay, int bx, int by, int r) {
   int dx = abs(bx - ax), sx = ax < bx ? 1 : -1;
   int dy = -abs(by - ay), sy = ay < by ? 1 : -1;
   int err = dx + dy;
@@ -639,6 +683,7 @@ static void showStatusScreen(const String &nameIn,
                              const String &generatedTimestampIn = "",
                              time_t generatedEpochIn = 0,
                              int batteryPercentIn = -1,
+                             bool batteryChargingIn = false,
                              bool usePartialUpdate = true) {
   const int margin = 14;
 
@@ -738,7 +783,7 @@ static void showStatusScreen(const String &nameIn,
   }
 
   // Bottom-left battery indicator
-  drawBatteryIndicator(margin, EPD_H - margin - 14, batteryPercentIn);
+  drawBatteryIndicator(margin, EPD_H - margin - 14, batteryPercentIn, batteryChargingIn);
 
   EPD_Display(ImageBW);
   if (usePartialUpdate) {
@@ -752,7 +797,7 @@ static void showStatusScreen(const String &nameIn,
 
 static void showStatusSplash(const String &line1, const String &line2) {
   // Use the same status layout for splash screens
-  showStatusScreen(line1, "error", line2, "", "", "", "", "", 0);
+  showStatusScreen(line1, "error", line2, "", "", "", "", "", 0, -1, false);
 }
 
 // -------------------- PANEL INIT --------------------
@@ -802,7 +847,7 @@ static void handleRebootButtons() {
 static bool fetchAndMaybeUpdateDisplay() {
   if (WiFi.status() != WL_CONNECTED) {
     // Don't spam partial refreshes; show a useful offline screen.
-    showStatusScreen("WIFI OFFLINE", "error", "OFFLINE", "MAC " + getMacString(), "", "", "", "", 0);
+    showStatusScreen("WIFI OFFLINE", "error", "OFFLINE", "MAC " + getMacString(), "", "", "", "", 0, -1, false);
     return false;
   }
 
@@ -812,7 +857,7 @@ static bool fetchAndMaybeUpdateDisplay() {
 
   if (code != 200) {
     http.end();
-    showStatusScreen("HTTP ERROR", "error", "OFFLINE", String(code), "", "", "", "", 0);
+    showStatusScreen("HTTP ERROR", "error", "OFFLINE", String(code), "", "", "", "", 0, -1, false);
     return false;
   }
 
@@ -823,7 +868,7 @@ static bool fetchAndMaybeUpdateDisplay() {
   StaticJsonDocument<8192> doc;
   DeserializationError err = deserializeJson(doc, payload);
   if (err) {
-    showStatusScreen("JSON ERROR", "error", "OFFLINE", err.c_str(), "", "", "", "", 0);
+    showStatusScreen("JSON ERROR", "error", "OFFLINE", err.c_str(), "", "", "", "", 0, -1, false);
     return false;
   }
 
@@ -878,11 +923,21 @@ static bool fetchAndMaybeUpdateDisplay() {
     detailLine = label;
   }
 
+  int batteryMv = readBatteryMilliVolts();
   int batteryPercent = readBatteryPercent();
+  bool batteryCharging = isBatteryCharging();
   int batteryBucket = (batteryPercent < 0) ? -1 : ((batteryPercent + 2) / 5) * 5;
 
+  Serial.printf("[BAT] pin=%d mv=%d pct=%d charging=%s\n", BATTERY_ADC_PIN, batteryMv, batteryPercent, batteryCharging ? "yes" : "no");
+
+  if (batteryMv > 0 && !batteryCharging && batteryMv <= BATTERY_CUTOFF_MV) {
+    showStatusScreen(topName, "error", "LOW BATTERY", "Please charge via USB-C", "", "", "", generatedTimestampDisplay, generatedEpoch, batteryPercent, batteryCharging, false);
+    enterTimedDeepSleep(6UL * 60UL * 60UL, "low-battery cutoff");
+    return false;
+  }
+
   // Fingerprint what matters + current minute (so clock updates)
-  String displayKey = topName + "|" + state + "|" + bigStatus + "|" + detailLine + "|" + until + "|" + nextEventAt + "|" + source + "|" + minuteKeyFromEpoch(generatedEpoch) + "|" + String(batteryBucket);
+  String displayKey = topName + "|" + state + "|" + bigStatus + "|" + detailLine + "|" + until + "|" + nextEventAt + "|" + source + "|" + minuteKeyFromEpoch(generatedEpoch) + "|" + String(batteryBucket) + "|" + String(batteryCharging ? 1 : 0);
   uint32_t fp = fnv1a32(displayKey);
 
   if (fp == lastFingerprint) {
@@ -907,7 +962,7 @@ static bool fetchAndMaybeUpdateDisplay() {
       Serial.println("[EPD] Status changed; forcing full refresh/clear...");
     }
     epdFullRefreshClear();
-    showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, generatedTimestampDisplay, generatedEpoch, batteryPercent, false);
+    showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, generatedTimestampDisplay, generatedEpoch, batteryPercent, batteryCharging, false);
     if (ENABLE_OFF_HOURS_DEEP_SLEEP && isOffHours(generatedEpoch)) {
       enterTimedDeepSleep(OFF_HOURS_WAKE_SECONDS, "off-hours full-refresh");
     }
@@ -915,7 +970,7 @@ static bool fetchAndMaybeUpdateDisplay() {
   }
 
   // Draw + partial update
-  showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, generatedTimestampDisplay, generatedEpoch, batteryPercent);
+  showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, generatedTimestampDisplay, generatedEpoch, batteryPercent, batteryCharging);
 
   partialSinceFull++;
   Serial.printf("[EPD] Updated. partialSinceFull=%u\n", partialSinceFull);
@@ -925,7 +980,11 @@ static bool fetchAndMaybeUpdateDisplay() {
     epdFullRefreshClear();
 
     // Re-draw current content after a full clear
-    showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, generatedTimestampDisplay, generatedEpoch, batteryPercent, false);
+    showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, generatedTimestampDisplay, generatedEpoch, batteryPercent, batteryCharging, false);
+  }
+
+  if (ENABLE_OFF_HOURS_DEEP_SLEEP && isOffHours(generatedEpoch)) {
+    enterTimedDeepSleep(OFF_HOURS_WAKE_SECONDS, "off-hours updated");
   }
 
   if (ENABLE_OFF_HOURS_DEEP_SLEEP && isOffHours(generatedEpoch)) {
@@ -968,6 +1027,14 @@ void setup() {
                   backBaseline ? "HIGH" : "LOW");
   }
 
+  if (BATTERY_CHARGE_DETECT_PIN >= 0) {
+    pinMode(BATTERY_CHARGE_DETECT_PIN, INPUT_PULLUP);
+  }
+
+  if (BATTERY_ADC_PIN >= 0) {
+    pinMode(BATTERY_ADC_PIN, INPUT);
+  }
+
   // Display
   initPanel();
   showStatusSplash("Booting...", "Starting WiFi");
@@ -986,7 +1053,7 @@ void setup() {
   } else {
     Serial.println("WiFi failed to connect.");
     // Show MAC so you can identify the device even when offline
-    showStatusScreen("WIFI FAILED", "error", "OFFLINE", "MAC " + getMacString(), "", "", "", "", 0);
+    showStatusScreen("WIFI FAILED", "error", "OFFLINE", "MAC " + getMacString(), "", "", "", "", 0, -1, false);
   }
 
   // Poll immediately on boot
