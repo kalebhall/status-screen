@@ -8,7 +8,8 @@
   - Extracts a target person's fields from JSON (name/label/state/detail/next_event_at)
   - Computes a fingerprint of what would be displayed INCLUDING the current minute (keeps clock alive)
   - ONLY updates the e-paper when the fingerprint changes
-  - Long-press MENU or BACK for ~1.5s to reboot (ESP.restart)
+  - Optional long-press MENU or BACK for ~1.5s to reboot (ESP.restart)
+  - Optional deep sleep during off-hours for best battery life
 
   Notes:
   - Uses Elecrow's EPD.h stack (which pulls in GUI_Paint / Paint_*)
@@ -22,6 +23,7 @@
 #include <SPI.h>
 #include <time.h>
 #include <esp_wifi.h>
+#include <esp_sleep.h>
 
 // Elecrow e-paper driver headers
 #include "EPD.h"   // provides EPD_* and Paint_* in this stack
@@ -35,6 +37,15 @@ static const char *TARGET_PERSON = "alex"; // Match against the "name" field (ca
 
 // Poll server every 30 seconds
 constexpr unsigned long POLL_MS = 30UL * 1000UL;
+
+// Battery-saver mode: in off-hours, wake on a timer, poll once, and sleep again.
+constexpr bool ENABLE_OFF_HOURS_DEEP_SLEEP = true;
+constexpr int ACTIVE_HOURS_START = 8;   // inclusive, local/Pacific hour [0..23]
+constexpr int ACTIVE_HOURS_END = 18;    // exclusive
+constexpr uint32_t OFF_HOURS_WAKE_SECONDS = 15UL * 60UL;
+
+// Disable button polling when on battery for lower idle power.
+constexpr bool ENABLE_REBOOT_BUTTONS = false;
 
 // Full refresh every N partial updates (helps reduce ghosting)
 constexpr uint8_t FULL_REFRESH_EVERY = 30;  // ~15 minutes if changing every 30s
@@ -75,6 +86,8 @@ static void drawSans56String(int x, int y, const String &s, int tracking = -1, b
 static void fillRect(int x1, int y1, int x2, int y2);
 static int readBatteryPercent();
 static void drawBatteryIndicator(int x, int y, int batteryPercent);
+static bool isOffHours(time_t epoch);
+static void enterTimedDeepSleep(uint32_t seconds, const char *reason);
 
 // -------------------- HELPERS --------------------
 static uint32_t fnv1a32(const String &s) {
@@ -89,6 +102,34 @@ static uint32_t fnv1a32(const String &s) {
 static inline bool buttonPressed(uint8_t pin, int baseline) {
   // Treat "changed from baseline" as pressed (works for active-low and active-high)
   return digitalRead(pin) != baseline;
+}
+
+static bool isOffHours(time_t epoch) {
+  if (epoch <= 0) return false;
+
+  struct tm local;
+  localtime_r(&epoch, &local);
+
+  const int hour = local.tm_hour;
+  return (hour < ACTIVE_HOURS_START) || (hour >= ACTIVE_HOURS_END);
+}
+
+static void enterTimedDeepSleep(uint32_t seconds, const char *reason) {
+  if (seconds == 0) return;
+
+  Serial.printf("[PWR] Deep sleep for %lu seconds (%s)\n", (unsigned long)seconds, reason ? reason : "");
+  Serial.flush();
+
+  // Put panel in deep sleep and remove rail power before CPU deep sleep.
+  EPD_DeepSleep();
+  digitalWrite(7, LOW);
+  digitalWrite(42, LOW);
+
+  WiFi.disconnect(true, true);
+  WiFi.mode(WIFI_OFF);
+
+  esp_sleep_enable_timer_wakeup((uint64_t)seconds * 1000000ULL);
+  esp_deep_sleep_start();
 }
 
 static int readBatteryPercent() {
@@ -737,6 +778,8 @@ static void initPanel() {
 }
 
 static void handleRebootButtons() {
+  if (!ENABLE_REBOOT_BUTTONS) return;
+
   static unsigned long downSince = 0;
 
   bool down = buttonPressed(BTN_MENU, menuBaseline) || buttonPressed(BTN_BACK, backBaseline);
@@ -844,6 +887,9 @@ static bool fetchAndMaybeUpdateDisplay() {
 
   if (fp == lastFingerprint) {
     Serial.println("[EPD] No change; skipping update.");
+    if (ENABLE_OFF_HOURS_DEEP_SLEEP && isOffHours(generatedEpoch)) {
+      enterTimedDeepSleep(OFF_HOURS_WAKE_SECONDS, "off-hours no-change");
+    }
     return false;
   }
 
@@ -862,6 +908,9 @@ static bool fetchAndMaybeUpdateDisplay() {
     }
     epdFullRefreshClear();
     showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, generatedTimestampDisplay, generatedEpoch, batteryPercent, false);
+    if (ENABLE_OFF_HOURS_DEEP_SLEEP && isOffHours(generatedEpoch)) {
+      enterTimedDeepSleep(OFF_HOURS_WAKE_SECONDS, "off-hours full-refresh");
+    }
     return true;
   }
 
@@ -877,6 +926,10 @@ static bool fetchAndMaybeUpdateDisplay() {
 
     // Re-draw current content after a full clear
     showStatusScreen(topName, state, bigStatus, detailLine, until, source, nextEventAt, generatedTimestampDisplay, generatedEpoch, batteryPercent, false);
+  }
+
+  if (ENABLE_OFF_HOURS_DEEP_SLEEP && isOffHours(generatedEpoch)) {
+    enterTimedDeepSleep(OFF_HOURS_WAKE_SECONDS, "off-hours updated");
   }
 
   return true;
@@ -904,14 +957,16 @@ void setup() {
   WiFi.mode(WIFI_STA);
 
   // Buttons
-  pinMode(BTN_MENU, INPUT_PULLUP);
-  pinMode(BTN_BACK, INPUT_PULLUP);
-  delay(10);
-  menuBaseline = digitalRead(BTN_MENU);
-  backBaseline = digitalRead(BTN_BACK);
-  Serial.printf("Button baselines: MENU=%s, BACK=%s\n",
-                menuBaseline ? "HIGH" : "LOW",
-                backBaseline ? "HIGH" : "LOW");
+  if (ENABLE_REBOOT_BUTTONS) {
+    pinMode(BTN_MENU, INPUT_PULLUP);
+    pinMode(BTN_BACK, INPUT_PULLUP);
+    delay(10);
+    menuBaseline = digitalRead(BTN_MENU);
+    backBaseline = digitalRead(BTN_BACK);
+    Serial.printf("Button baselines: MENU=%s, BACK=%s\n",
+                  menuBaseline ? "HIGH" : "LOW",
+                  backBaseline ? "HIGH" : "LOW");
+  }
 
   // Display
   initPanel();
