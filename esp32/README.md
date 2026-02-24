@@ -54,6 +54,19 @@ sudo systemctl restart status-from-ics.service
 The sample sketch uses `name`, `label`, and `detail` for display.
 It also uses `state` to choose an icon to draw next to the status.
 
+## Battery life / deep sleep
+
+Yes — you can run this on battery and use deep sleep during off-hours.
+
+In `status_screen_epaper/status_screen_epaper.ino`, these settings control it:
+
+- `ENABLE_OFF_HOURS_DEEP_SLEEP`: enables timer wake + deep sleep.
+- `ACTIVE_HOURS_START` / `ACTIVE_HOURS_END`: local hours where the device stays awake and polls every 30s.
+- `OFF_HOURS_WAKE_SECONDS`: wake interval during off-hours (poll once, update if needed, then sleep again).
+- `ENABLE_REBOOT_BUTTONS`: set to `false` to skip button polling and save a bit more power.
+
+The sketch uses the server `generated` timestamp (formatted in Pacific time) to decide whether current time is in off-hours.
+
 ## Troubleshooting: BOOT / RESET buttons not working
 
 If the physical BOOT or RESET buttons appear unresponsive, the most common cause
