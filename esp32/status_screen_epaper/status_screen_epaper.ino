@@ -40,9 +40,9 @@ constexpr unsigned long POLL_MS = 30UL * 1000UL;
 
 // Battery-saver mode: in off-hours, wake on a timer, poll once, and sleep again.
 constexpr bool ENABLE_OFF_HOURS_DEEP_SLEEP = true;
-constexpr int ACTIVE_HOURS_START = 8;   // inclusive, local/Pacific hour [0..23]
-constexpr int ACTIVE_HOURS_END = 18;    // exclusive
-constexpr uint32_t OFF_HOURS_WAKE_SECONDS = 15UL * 60UL;
+constexpr int ACTIVE_HOURS_START = 7;   // inclusive, local/Pacific hour [0..23]
+constexpr int ACTIVE_HOURS_END = 19;    // exclusive
+constexpr uint32_t OFF_HOURS_WAKE_SECONDS = 30UL * 60UL;
 
 // Disable button polling when on battery for lower idle power.
 constexpr bool ENABLE_REBOOT_BUTTONS = false;
