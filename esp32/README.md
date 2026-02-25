@@ -54,6 +54,52 @@ sudo systemctl restart status-from-ics.service
 The sample sketch uses `name`, `label`, and `detail` for display.
 It also uses `state` to choose an icon to draw next to the status.
 
+## Battery life / deep sleep
+
+Yes — you can run this on battery and use deep sleep during off-hours.
+
+In `status_screen_epaper/status_screen_epaper.ino`, these settings control it:
+
+- `ENABLE_OFF_HOURS_DEEP_SLEEP`: enables timer wake + deep sleep.
+- `ACTIVE_HOURS_START` / `ACTIVE_HOURS_END`: local hours where the device stays awake and polls every 30s.
+- `OFF_HOURS_WAKE_SECONDS`: wake interval during off-hours (poll once, update if needed, then sleep again).
+- `ENABLE_REBOOT_BUTTONS`: set to `false` to skip button polling and save a bit more power.
+- `SHOW_BATTERY_INDICATOR`: set to `false` to hide battery UI and skip battery/charging reads (recommended for non-battery power).
+- `BATTERY_CUTOFF_MV`: when battery is below this threshold and not charging, the sketch shows a low-battery warning and enters a long deep sleep.
+- `BATTERY_ADC_PIN`: ADC input used for battery-voltage measurement. Set `-1` to disable when battery sense is not wired.
+- `BATTERY_CHARGE_DETECT_PIN`: set this to your charger status GPIO (`CHRG`) to show charging state on-screen (default `-1` disables charging detection).
+
+The sketch uses the server `generated` timestamp (formatted in Pacific time) to decide whether current time is in off-hours.
+When charging detection is wired, the battery widget shows `CHG xx%` plus a lightning icon while charging.
+
+
+
+### Battery voltage reading verification (from your schematic)
+
+From the schematic you posted, the battery/charger section does not clearly show a battery-sense
+divider routed into an ESP32 ADC pin. That means the previous default (`GPIO4`) is likely not a
+valid battery measurement source on this board revision, which explains a stuck battery %.
+
+In this repo we now default `BATTERY_ADC_PIN` to `-1` (disabled) so the UI won’t present a false
+voltage-based percentage unless you provide a real battery-sense ADC connection.
+
+If you do add/identify a real sense line, set:
+- `BATTERY_ADC_PIN` to that ADC-capable GPIO
+- `BATTERY_DIVIDER_RATIO` to the actual divider ratio from your resistor values
+
+Use serial logs (`[BAT] ...`) while testing to confirm measured mV changes as expected.
+
+### Charging detect pin on this board
+
+From the schematic you shared, the battery charger status pin (`CHRG`) does **not** appear
+to be routed to an ESP32-S3 GPIO (it looks routed only to a test pad). That means:
+
+- There is no firmware-only GPIO number to set today for `BATTERY_CHARGE_DETECT_PIN`.
+- Keep `BATTERY_CHARGE_DETECT_PIN = -1` on stock hardware.
+- If you want true charging state on-screen, a hardware rework is needed (wire `CHRG` to a
+  free GPIO, then set that GPIO number in the sketch).
+
+
 ## Troubleshooting: BOOT / RESET buttons not working
 
 If the physical BOOT or RESET buttons appear unresponsive, the most common cause
