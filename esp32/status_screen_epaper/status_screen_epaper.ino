@@ -42,7 +42,7 @@ constexpr unsigned long POLL_MS = 30UL * 1000UL;
 constexpr bool ENABLE_OFF_HOURS_DEEP_SLEEP = true;
 constexpr int ACTIVE_HOURS_START = 8;   // inclusive, local/Pacific hour [0..23]
 constexpr int ACTIVE_HOURS_END = 18;    // exclusive
-constexpr uint32_t OFF_HOURS_WAKE_SECONDS = 15UL * 60UL;
+constexpr uint32_t OFF_HOURS_WAKE_SECONDS = 30UL * 60UL;
 
 // Disable button polling when on battery for lower idle power.
 constexpr bool ENABLE_REBOOT_BUTTONS = false;
@@ -944,6 +944,14 @@ static bool fetchAndMaybeUpdateDisplay() {
       enterTimedDeepSleep(6UL * 60UL * 60UL, "low-battery cutoff");
       return false;
     }
+  }
+
+  Serial.printf("[BAT] pin=%d mv=%d pct=%d charging=%s\n", BATTERY_ADC_PIN, batteryMv, batteryPercent, batteryCharging ? "yes" : "no");
+
+  if (batteryMv > 0 && !batteryCharging && batteryMv <= BATTERY_CUTOFF_MV) {
+    showStatusScreen(topName, "error", "LOW BATTERY", "Please charge via USB-C", "", "", "", generatedTimestampDisplay, generatedEpoch, batteryPercent, batteryCharging, false);
+    enterTimedDeepSleep(6UL * 60UL * 60UL, "low-battery cutoff");
+    return false;
   }
 
   // Fingerprint what matters + current minute (so clock updates)
