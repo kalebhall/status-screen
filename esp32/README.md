@@ -64,6 +64,7 @@ In `status_screen_epaper/status_screen_epaper.ino`, these settings control it:
 - `ACTIVE_HOURS_START` / `ACTIVE_HOURS_END`: local hours where the device stays awake and polls every 30s.
 - `OFF_HOURS_WAKE_SECONDS`: wake interval during off-hours (poll once, update if needed, then sleep again).
 - `ENABLE_REBOOT_BUTTONS`: set to `false` to skip button polling and save a bit more power.
+- `SHOW_BATTERY_INDICATOR`: set to `false` to hide battery UI and skip battery/charging reads (recommended for non-battery power).
 - `BATTERY_CUTOFF_MV`: when battery is below this threshold and not charging, the sketch shows a low-battery warning and enters a long deep sleep.
 - `BATTERY_ADC_PIN`: ADC input used for battery-voltage measurement. Set `-1` to disable when battery sense is not wired.
 - `BATTERY_CHARGE_DETECT_PIN`: set this to your charger status GPIO (`CHRG`) to show charging state on-screen (default `-1` disables charging detection).

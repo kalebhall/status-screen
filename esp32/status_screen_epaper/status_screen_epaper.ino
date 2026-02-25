@@ -40,8 +40,8 @@ constexpr unsigned long POLL_MS = 30UL * 1000UL;
 
 // Battery-saver mode: in off-hours, wake on a timer, poll once, and sleep again.
 constexpr bool ENABLE_OFF_HOURS_DEEP_SLEEP = true;
-constexpr int ACTIVE_HOURS_START = 7;   // inclusive, local/Pacific hour [0..23]
-constexpr int ACTIVE_HOURS_END = 19;    // exclusive
+constexpr int ACTIVE_HOURS_START = 8;   // inclusive, local/Pacific hour [0..23]
+constexpr int ACTIVE_HOURS_END = 18;    // exclusive
 constexpr uint32_t OFF_HOURS_WAKE_SECONDS = 30UL * 60UL;
 
 // Disable button polling when on battery for lower idle power.
@@ -64,6 +64,7 @@ constexpr float BATTERY_DIVIDER_RATIO = 2.0f; // ADC sees Vbat/divider when wire
 constexpr int BATTERY_EMPTY_MV = 3300;
 constexpr int BATTERY_FULL_MV = 4200;
 constexpr int BATTERY_CUTOFF_MV = 3250; // If not charging, enter long deep sleep below this voltage.
+constexpr bool SHOW_BATTERY_INDICATOR = false; // Set true when running on battery and battery telemetry is wired.
 
 // Optional charging detect input from charger IC (often CHRG, active-low).
 // Board note: on the posted CrowPanel schematic, CHRG is not routed to an ESP32 GPIO
@@ -782,8 +783,10 @@ static void showStatusScreen(const String &nameIn,
     drawSans24ScaledString(tsX, tsY, ts, 1, detailTracking, false);
   }
 
-  // Bottom-left battery indicator
-  drawBatteryIndicator(margin, EPD_H - margin - 14, batteryPercentIn, batteryChargingIn);
+  // Bottom-left battery indicator (optional for non-battery installs)
+  if (SHOW_BATTERY_INDICATOR) {
+    drawBatteryIndicator(margin, EPD_H - margin - 14, batteryPercentIn, batteryChargingIn);
+  }
 
   EPD_Display(ImageBW);
   if (usePartialUpdate) {
@@ -923,10 +926,25 @@ static bool fetchAndMaybeUpdateDisplay() {
     detailLine = label;
   }
 
-  int batteryMv = readBatteryMilliVolts();
-  int batteryPercent = readBatteryPercent();
-  bool batteryCharging = isBatteryCharging();
-  int batteryBucket = (batteryPercent < 0) ? -1 : ((batteryPercent + 2) / 5) * 5;
+  int batteryMv = -1;
+  int batteryPercent = -1;
+  bool batteryCharging = false;
+  int batteryBucket = -1;
+
+  if (SHOW_BATTERY_INDICATOR) {
+    batteryMv = readBatteryMilliVolts();
+    batteryPercent = readBatteryPercent();
+    batteryCharging = isBatteryCharging();
+    batteryBucket = (batteryPercent < 0) ? -1 : ((batteryPercent + 2) / 5) * 5;
+
+    Serial.printf("[BAT] pin=%d mv=%d pct=%d charging=%s\n", BATTERY_ADC_PIN, batteryMv, batteryPercent, batteryCharging ? "yes" : "no");
+
+    if (batteryMv > 0 && !batteryCharging && batteryMv <= BATTERY_CUTOFF_MV) {
+      showStatusScreen(topName, "error", "LOW BATTERY", "Please charge via USB-C", "", "", "", generatedTimestampDisplay, generatedEpoch, batteryPercent, batteryCharging, false);
+      enterTimedDeepSleep(6UL * 60UL * 60UL, "low-battery cutoff");
+      return false;
+    }
+  }
 
   Serial.printf("[BAT] pin=%d mv=%d pct=%d charging=%s\n", BATTERY_ADC_PIN, batteryMv, batteryPercent, batteryCharging ? "yes" : "no");
 
@@ -937,7 +955,7 @@ static bool fetchAndMaybeUpdateDisplay() {
   }
 
   // Fingerprint what matters + current minute (so clock updates)
-  String displayKey = topName + "|" + state + "|" + bigStatus + "|" + detailLine + "|" + until + "|" + nextEventAt + "|" + source + "|" + minuteKeyFromEpoch(generatedEpoch) + "|" + String(batteryBucket) + "|" + String(batteryCharging ? 1 : 0);
+  String displayKey = topName + "|" + state + "|" + bigStatus + "|" + detailLine + "|" + until + "|" + nextEventAt + "|" + source + "|" + minuteKeyFromEpoch(generatedEpoch) + "|" + String(batteryBucket) + "|" + String(batteryCharging ? 1 : 0) + "|" + String(SHOW_BATTERY_INDICATOR ? 1 : 0);
   uint32_t fp = fnv1a32(displayKey);
 
   if (fp == lastFingerprint) {
@@ -987,10 +1005,6 @@ static bool fetchAndMaybeUpdateDisplay() {
     enterTimedDeepSleep(OFF_HOURS_WAKE_SECONDS, "off-hours updated");
   }
 
-  if (ENABLE_OFF_HOURS_DEEP_SLEEP && isOffHours(generatedEpoch)) {
-    enterTimedDeepSleep(OFF_HOURS_WAKE_SECONDS, "off-hours updated");
-  }
-
   return true;
 }
 
@@ -1027,11 +1041,11 @@ void setup() {
                   backBaseline ? "HIGH" : "LOW");
   }
 
-  if (BATTERY_CHARGE_DETECT_PIN >= 0) {
+  if (SHOW_BATTERY_INDICATOR && BATTERY_CHARGE_DETECT_PIN >= 0) {
     pinMode(BATTERY_CHARGE_DETECT_PIN, INPUT_PULLUP);
   }
 
-  if (BATTERY_ADC_PIN >= 0) {
+  if (SHOW_BATTERY_INDICATOR && BATTERY_ADC_PIN >= 0) {
     pinMode(BATTERY_ADC_PIN, INPUT);
   }
 
