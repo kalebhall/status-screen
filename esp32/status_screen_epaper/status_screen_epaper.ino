@@ -704,11 +704,14 @@ static void showStatusScreen(const String &nameIn,
 
   // Top name (centered, all caps, a bit larger/heavier)
   int nameMaxW = EPD_W - margin * 2;
-  uint8_t nameScale = 2;
+  uint8_t nameScale = 3;
   int nameTracking = 1;
   if (scaledSans24TextWidthPx(name, nameScale, nameTracking) > nameMaxW) {
-    nameScale = 1;
-    nameTracking = 0;
+    nameScale = 2;
+    if (scaledSans24TextWidthPx(name, nameScale, nameTracking) > nameMaxW) {
+      nameScale = 1;
+      nameTracking = 0;
+    }
   }
   name = ellipsizeSans24ToFit(name, nameScale, nameTracking, nameMaxW);
   {
