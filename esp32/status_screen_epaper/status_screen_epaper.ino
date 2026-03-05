@@ -704,18 +704,21 @@ static void showStatusScreen(const String &nameIn,
 
   // Top name (centered, all caps, a bit larger/heavier)
   int nameMaxW = EPD_W - margin * 2;
-  uint8_t nameScale = 2;
+  uint8_t nameScale = 3;
   int nameTracking = 1;
   if (scaledSans24TextWidthPx(name, nameScale, nameTracking) > nameMaxW) {
-    nameScale = 1;
-    nameTracking = 0;
+    nameScale = 2;
+    if (scaledSans24TextWidthPx(name, nameScale, nameTracking) > nameMaxW) {
+      nameScale = 1;
+      nameTracking = 0;
+    }
   }
   name = ellipsizeSans24ToFit(name, nameScale, nameTracking, nameMaxW);
   {
     int nw = scaledSans24TextWidthPx(name, nameScale, nameTracking);
     int nx = (EPD_W - nw) / 2;
     if (nx < 0) nx = 0;
-    drawSans24ScaledString(nx, 6, name, nameScale, nameTracking, true);
+    drawSans24ScaledString(nx, 2, name, nameScale, nameTracking, true);
   }
 
   // Big status + icon.
@@ -737,15 +740,15 @@ static void showStatusScreen(const String &nameIn,
   if (groupX < margin) groupX = margin;
 
   // Vertically centre the 56px text within the 72px icon box.
-  int statusY = 40 + (iconH - 56) / 2;
-  int iconY   = 40;
+  int statusY = 56 + (iconH - 56) / 2;
+  int iconY   = 56;
   int wordX   = groupX + iconW + gap;
 
   drawStatusIcon(state, groupX, iconY, iconW, iconH);
   drawSans56String(wordX, statusY, status, statusTracking, true);
 
   // Divider
-  EPD_DrawLine(margin, 124, EPD_W - margin, 124, BLACK);
+  EPD_DrawLine(margin, 140, EPD_W - margin, 140, BLACK);
 
   String detailLine = detail;
   String untilLine = formatUntil(untilIn, sourceIn, generatedEpochIn);
@@ -766,7 +769,7 @@ static void showStatusScreen(const String &nameIn,
     int lw = scaledSans24TextWidthPx(lines[i], 1, detailTracking);
     int lx = (EPD_W - lw) / 2;
     if (lx < 0) lx = 0;
-    drawSans24ScaledString(lx, 136 + i * 30, lines[i], 1, detailTracking, false);
+    drawSans24ScaledString(lx, 152 + i * 30, lines[i], 1, detailTracking, false);
   }
 
   if (sourceIn == "working_hours") {
