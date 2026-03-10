@@ -37,6 +37,7 @@ static const char *TARGET_PERSON = "alex"; // Match against the "name" field (ca
 
 // Poll server every 30 seconds
 constexpr unsigned long POLL_MS = 30UL * 1000UL;
+constexpr unsigned long IDLE_LIGHT_SLEEP_MIN_MS = 250UL;
 
 // Battery-saver mode: in off-hours, wake on a timer, poll once, and sleep again.
 constexpr bool ENABLE_OFF_HOURS_DEEP_SLEEP = true;
@@ -101,6 +102,11 @@ static void drawBatteryIndicator(int x, int y, int batteryPercent, bool isChargi
 static void thickLine(int ax, int ay, int bx, int by, int r = 2);
 static bool isOffHours(time_t epoch);
 static void enterTimedDeepSleep(uint32_t seconds, const char *reason);
+static void sleepUntilNextPoll(unsigned long nowMs);
+static bool showFallbackScreenIfChanged(const String &title,
+                                        const String &status,
+                                        const String &detail,
+                                        bool useFullUpdate = true);
 
 // -------------------- HELPERS --------------------
 static uint32_t fnv1a32(const String &s) {
@@ -143,6 +149,36 @@ static void enterTimedDeepSleep(uint32_t seconds, const char *reason) {
 
   esp_sleep_enable_timer_wakeup((uint64_t)seconds * 1000000ULL);
   esp_deep_sleep_start();
+}
+
+static void sleepUntilNextPoll(unsigned long nowMs) {
+  long remainingMsSigned = (long)(nextPollAt - nowMs);
+  if (remainingMsSigned < (long)IDLE_LIGHT_SLEEP_MIN_MS) return;
+
+  unsigned long remainingMs = (unsigned long)remainingMsSigned;
+
+  // Keep the display state unchanged and let the MCU/CPU idle at low power
+  // between polls. This preserves all features while removing the active-spin
+  // `delay(20)` loop power draw.
+  esp_sleep_enable_timer_wakeup((uint64_t)remainingMs * 1000ULL);
+  esp_light_sleep_start();
+}
+
+static bool showFallbackScreenIfChanged(const String &title,
+                                        const String &status,
+                                        const String &detail,
+                                        bool useFullUpdate) {
+  String key = String("fallback|") + title + "|" + status + "|" + detail;
+  uint32_t fp = fnv1a32(key);
+  if (fp == lastFingerprint) {
+    Serial.println("[EPD] Fallback unchanged; skipping update.");
+    return false;
+  }
+
+  lastFingerprint = fp;
+  lastStatusSignature = "";
+  showStatusScreen(title, "error", status, detail, "", "", "", "", 0, -1, false, !useFullUpdate);
+  return true;
 }
 
 static int readBatteryMilliVolts() {
@@ -853,7 +889,7 @@ static void handleRebootButtons() {
 static bool fetchAndMaybeUpdateDisplay() {
   if (WiFi.status() != WL_CONNECTED) {
     // Don't spam partial refreshes; show a useful offline screen.
-    showStatusScreen("WIFI OFFLINE", "error", "OFFLINE", "MAC " + getMacString(), "", "", "", "", 0, -1, false);
+    showFallbackScreenIfChanged("WIFI OFFLINE", "OFFLINE", "MAC " + getMacString());
     return false;
   }
 
@@ -863,7 +899,7 @@ static bool fetchAndMaybeUpdateDisplay() {
 
   if (code != 200) {
     http.end();
-    showStatusScreen("HTTP ERROR", "error", "OFFLINE", String(code), "", "", "", "", 0, -1, false);
+    showFallbackScreenIfChanged("HTTP ERROR", "OFFLINE", String(code));
     return false;
   }
 
@@ -874,7 +910,7 @@ static bool fetchAndMaybeUpdateDisplay() {
   StaticJsonDocument<8192> doc;
   DeserializationError err = deserializeJson(doc, payload);
   if (err) {
-    showStatusScreen("JSON ERROR", "error", "OFFLINE", err.c_str(), "", "", "", "", 0, -1, false);
+    showFallbackScreenIfChanged("JSON ERROR", "OFFLINE", err.c_str());
     return false;
   }
 
@@ -1014,6 +1050,7 @@ static bool fetchAndMaybeUpdateDisplay() {
 // -------------------- WIFI CONNECT --------------------
 static bool connectWifiWithTimeout(uint32_t timeoutMs) {
   WiFi.mode(WIFI_STA);
+  WiFi.setSleep(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   uint32_t start = millis();
@@ -1021,7 +1058,12 @@ static bool connectWifiWithTimeout(uint32_t timeoutMs) {
     handleRebootButtons();
     delay(50);
   }
-  return (WiFi.status() == WL_CONNECTED);
+  bool connected = (WiFi.status() == WL_CONNECTED);
+  if (connected) {
+    // Allow the radio to sleep between DTIM beacons when idle.
+    esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
+  }
+  return connected;
 }
 
 // -------------------- ARDUINO --------------------
@@ -1086,6 +1128,5 @@ void loop() {
     Serial.println("[NET] Polling server...");
     fetchAndMaybeUpdateDisplay();
   }
-
-  delay(20);
+  sleepUntilNextPoll(millis());
 }
