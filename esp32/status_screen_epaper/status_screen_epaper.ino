@@ -37,6 +37,10 @@ static const char *TARGET_PERSON = "alex"; // Match against the "name" field (ca
 
 // Poll server every 30 seconds
 constexpr unsigned long POLL_MS = 30UL * 1000UL;
+// Some ESP32-S3 board/driver combinations can reset (RTCWDT_RTC_RST)
+// when entering light sleep with Wi-Fi + e-paper traffic active.
+// Keep this off by default for stability; enable after board-level validation.
+constexpr bool ENABLE_IDLE_LIGHT_SLEEP = false;
 constexpr unsigned long IDLE_LIGHT_SLEEP_MIN_MS = 250UL;
 
 // Battery-saver mode: in off-hours, wake on a timer, poll once, and sleep again.
@@ -165,13 +169,24 @@ static void enterTimedDeepSleep(uint32_t seconds, const char *reason) {
 
 static void sleepUntilNextPoll(unsigned long nowMs) {
   long remainingMsSigned = (long)(nextPollAt - nowMs);
-  if (remainingMsSigned < (long)IDLE_LIGHT_SLEEP_MIN_MS) return;
+  if (remainingMsSigned <= 0) return;
+
+  if (!ENABLE_IDLE_LIGHT_SLEEP) {
+    // Stable fallback path for boards that reset in light sleep.
+    unsigned long napMs = (remainingMsSigned > 20) ? 20UL : (unsigned long)remainingMsSigned;
+    delay(napMs);
+    return;
+  }
+
+  if (remainingMsSigned < (long)IDLE_LIGHT_SLEEP_MIN_MS) {
+    delay((unsigned long)remainingMsSigned);
+    return;
+  }
 
   unsigned long remainingMs = (unsigned long)remainingMsSigned;
 
   // Keep the display state unchanged and let the MCU/CPU idle at low power
-  // between polls. This preserves all features while removing the active-spin
-  // `delay(20)` loop power draw.
+  // between polls. This preserves all features while removing active polling.
   esp_sleep_enable_timer_wakeup((uint64_t)remainingMs * 1000ULL);
   esp_light_sleep_start();
 }
