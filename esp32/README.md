@@ -100,6 +100,57 @@ to be routed to an ESP32-S3 GPIO (it looks routed only to a test pad). That mean
   free GPIO, then set that GPIO number in the sketch).
 
 
+
+## Light sleep on CrowPanel ESP32 E-paper (important stability notes)
+
+The 5.79" CrowPanel uses an ESP32-S3 plus dual-controller e-paper panel. On some
+board/firmware combinations, entering **CPU light sleep** while Wi-Fi + e-paper are
+active can cause watchdog resets (for example: `rst:0x10 (RTCWDT_RTC_RST)`).
+
+Because of this, the sketch keeps idle light sleep configurable and conservative.
+
+### Recommended rollout sequence
+
+1. **Start from stable defaults first**
+   - Keep `ENABLE_IDLE_LIGHT_SLEEP = false`.
+   - Keep Wi-Fi modem power save enabled (`WiFi.setSleep(true)` and
+     `esp_wifi_set_ps(...)`) so the radio can still save power while awake.
+2. **Validate uptime** for several hours with normal polling and refresh activity.
+3. **Enable light sleep only after baseline stability is proven**
+   - Set `ENABLE_IDLE_LIGHT_SLEEP = true`.
+   - Start with shorter idle intervals and monitor reset logs.
+4. If resets return, disable light sleep and keep modem sleep + off-hours deep sleep.
+
+### Practical settings to try
+
+- Use `WIFI_PS_MIN_MODEM` first if `WIFI_PS_MAX_MODEM` behaves poorly on your AP.
+- Increase `OFF_HOURS_WAKE_SECONDS` to reduce wakeups overnight.
+- Keep `ENABLE_REBOOT_BUTTONS = false` for lowest idle overhead.
+
+### If you see reboot loops
+
+Symptoms often look like:
+
+- device connects to Wi-Fi,
+- performs first poll/update,
+- then resets with `RTCWDT_RTC_RST`.
+
+If that happens:
+
+1. Set `ENABLE_IDLE_LIGHT_SLEEP = false`.
+2. Re-flash and confirm loop stability.
+3. Keep off-hours deep sleep enabled for major battery gains.
+
+### Why this still improves battery life
+
+Even with idle light sleep disabled, you still get:
+
+- Wi-Fi modem power saving while connected,
+- reduced e-paper refreshes from display deduplication,
+- optional timed deep sleep during off-hours.
+
+This combination is usually the best reliability/power tradeoff on this board.
+
 ## Troubleshooting: BOOT / RESET buttons not working
 
 If the physical BOOT or RESET buttons appear unresponsive, the most common cause
