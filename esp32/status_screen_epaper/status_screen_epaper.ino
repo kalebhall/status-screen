@@ -102,6 +102,18 @@ static void drawBatteryIndicator(int x, int y, int batteryPercent, bool isChargi
 static void thickLine(int ax, int ay, int bx, int by, int r = 2);
 static bool isOffHours(time_t epoch);
 static void enterTimedDeepSleep(uint32_t seconds, const char *reason);
+static void showStatusScreen(const String &nameIn,
+                             const String &stateIn,
+                             const String &statusIn,
+                             const String &detailIn,
+                             const String &untilIn,
+                             const String &sourceIn,
+                             const String &nextEventIn,
+                             const String &generatedTimestampIn = "",
+                             time_t generatedEpochIn = 0,
+                             int batteryPercentIn = -1,
+                             bool batteryChargingIn = false,
+                             bool usePartialUpdate = true);
 static void sleepUntilNextPoll(unsigned long nowMs);
 static bool showFallbackScreenIfChanged(const String &title,
                                         const String &status,
@@ -717,11 +729,11 @@ static void showStatusScreen(const String &nameIn,
                              const String &untilIn,
                              const String &sourceIn,
                              const String &nextEventIn,
-                             const String &generatedTimestampIn = "",
-                             time_t generatedEpochIn = 0,
-                             int batteryPercentIn = -1,
-                             bool batteryChargingIn = false,
-                             bool usePartialUpdate = true) {
+                             const String &generatedTimestampIn,
+                             time_t generatedEpochIn,
+                             int batteryPercentIn,
+                             bool batteryChargingIn,
+                             bool usePartialUpdate) {
   const int margin = 14;
 
   String name   = nameIn;
