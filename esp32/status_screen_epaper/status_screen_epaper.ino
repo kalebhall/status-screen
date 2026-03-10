@@ -997,6 +997,7 @@ static bool fetchAndMaybeUpdateDisplay() {
   bool batteryCharging = false;
   int batteryBucket = -1;
 
+  // No battery icon means no battery telemetry is expected, so skip all battery polling.
   if (SHOW_BATTERY_INDICATOR) {
     batteryMv = readBatteryMilliVolts();
     batteryPercent = readBatteryPercent();
@@ -1010,14 +1011,6 @@ static bool fetchAndMaybeUpdateDisplay() {
       enterTimedDeepSleep(6UL * 60UL * 60UL, "low-battery cutoff");
       return false;
     }
-  }
-
-  Serial.printf("[BAT] pin=%d mv=%d pct=%d charging=%s\n", BATTERY_ADC_PIN, batteryMv, batteryPercent, batteryCharging ? "yes" : "no");
-
-  if (batteryMv > 0 && !batteryCharging && batteryMv <= BATTERY_CUTOFF_MV) {
-    showStatusScreen(topName, "error", "LOW BATTERY", "Please charge via USB-C", "", "", "", generatedTimestampDisplay, generatedEpoch, batteryPercent, batteryCharging, false);
-    enterTimedDeepSleep(6UL * 60UL * 60UL, "low-battery cutoff");
-    return false;
   }
 
   // Fingerprint what matters + current minute (so clock updates)
